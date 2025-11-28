@@ -128,8 +128,10 @@ def select_shallow_thinking_agent(provider) -> str:
     # Define shallow thinking llm engine options with their corresponding model names
     SHALLOW_AGENT_OPTIONS = {
         "openai": [
-            ("GPT-4.1 Mini - Latest balanced lightweight model", "gpt-4.1-mini"),
-            ("GPT-4.1 - Flagship general-purpose model", "gpt-4.1"),
+            ("GPT-5.1 Mini - Latest lightweight 5-series model", "gpt-5.1-mini"),
+            ("GPT-5.1 - Flagship general model", "gpt-5.1"),
+            ("GPT-4.1 Mini - Balanced lightweight model", "gpt-4.1-mini"),
+            ("GPT-4.1 - Proven general-purpose model", "gpt-4.1"),
             ("GPT-4o Mini - Fast multi-modal option", "gpt-4o-mini"),
             ("GPT-4o - Standard multi-modal model", "gpt-4o"),
         ],
@@ -190,7 +192,9 @@ def select_deep_thinking_agent(provider) -> str:
             ("o4-mini - Latest compact reasoning model", "o4-mini"),
             ("o3-mini - Advanced lightweight reasoning", "o3-mini"),
             ("o1 - Premier reasoning and problem-solving model", "o1"),
-            ("GPT-4.1 - Full-featured generalist", "gpt-4.1"),
+            ("GPT-5.1 Pro - Frontier long-form reasoning", "gpt-5.1-pro"),
+            ("GPT-5.1 - Full-featured generalist", "gpt-5.1"),
+            ("GPT-4.1 - Prior generation generalist", "gpt-4.1"),
         ],
         "anthropic": [
             ("Claude 3.7 Sonnet (latest)", "claude-3-7-sonnet-latest"),

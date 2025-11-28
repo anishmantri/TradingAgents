@@ -1,0 +1,6 @@
+from typing import Any
+
+class Tree:
+    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+    def add(self, *args: Any, **kwargs: Any) -> "Tree": ...

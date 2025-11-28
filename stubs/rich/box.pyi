@@ -1,0 +1,6 @@
+class Box:
+    SIMPLE_HEAD: "Box" = ...
+    MINIMAL: "Box" = ...
+
+SIMPLE_HEAD: Box
+MINIMAL: Box

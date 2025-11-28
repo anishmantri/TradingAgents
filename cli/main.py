@@ -1005,14 +1005,16 @@ def _build_latex_report(final_state, selections, decision, message_buffer, confi
 
 
 def save_structured_reports(final_state, selections, report_dir, message_buffer, decision, config):
-    markdown_report = _build_markdown_report(final_state, selections, decision, message_buffer, config)
-    latex_report = _build_latex_report(final_state, selections, decision, message_buffer, config)
+    """Persist the investment memo as a single LaTeX file."""
+    from cli.report_generator import build_latex_report, build_markdown_report
 
-    (report_dir / "final_report.md").write_text(markdown_report)
+    latex_report = build_latex_report(final_state, selections, decision, report_dir)
     (report_dir / "final_report.tex").write_text(latex_report)
-    console.print(
-        f"[green]Saved structured reports to {report_dir}[/green]",
-    )
+    console.print(f"[green]Saved LaTeX report to {report_dir / 'final_report.tex'}[/green]")
+
+    markdown_report = build_markdown_report(final_state, selections, decision)
+    (report_dir / "final_report.md").write_text(markdown_report)
+    console.print(f"[green]Saved Markdown report to {report_dir / 'final_report.md'}[/green]")
 
 
 def update_research_team_status(status):

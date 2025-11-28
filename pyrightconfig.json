@@ -1,0 +1,6 @@
+{
+  "include": ["cli", "tradingagents"],
+  "stubPath": "stubs",
+  "pythonVersion": "3.11",
+  "reportMissingImports": true
+}

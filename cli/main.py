@@ -739,6 +739,279 @@ def display_complete_report(final_state):
             )
 
 
+from collections import Counter
+
+
+def _format_markdown_table(rows):
+    table = ["| Metric | Value |", "| --- | --- |"]
+    for metric, value in rows:
+        value = (value or "-").replace("\n", "<br>")
+        table.append(f"| {metric} | {value} |")
+    return table
+
+
+def _get_reasoning_entries(message_buffer, limit=10):
+    return [entry for entry in message_buffer.messages if entry[1] in {"Reasoning", "Analysis"}][-limit:]
+
+
+def _get_tool_log_entries(message_buffer, limit=10):
+    return message_buffer.tool_calls[-limit:]
+
+
+def _build_markdown_report(final_state, selections, decision, message_buffer, config):
+    lines = [
+        f"# TradingAgents Report for {selections['ticker']} ({selections['analysis_date']})",
+        "",
+    ]
+
+    key_rows = [
+        ("Ticker", selections["ticker"]),
+        ("Trade Date", selections["analysis_date"]),
+        ("Final Decision", decision or "N/A"),
+        ("Quick-Thinking Model", selections["shallow_thinker"]),
+        ("Deep-Thinking Model", selections["deep_thinker"]),
+        ("Research Depth", selections.get("research_depth", "-")),
+        ("Lookback Window", f"{selections['lookback_days']} days"),
+        ("Analysts Engaged", ", ".join(a.value for a in selections["analysts"])),
+    ]
+    lines.append("## Key Metrics")
+    lines.extend(_format_markdown_table(key_rows))
+    lines.append("")
+
+    if config.get("data_vendors"):
+        lines.append("### Data Vendors")
+        for category, vendor in config["data_vendors"].items():
+            lines.append(f"- **{category}** → {vendor}")
+        if config.get("tool_vendors"):
+            lines.append("- **Tool Overrides**")
+            for tool, vendor in config["tool_vendors"].items():
+                lines.append(f"  - `{tool}` → {vendor}")
+        lines.append("")
+
+    def add_section(title, content):
+        if content:
+            lines.append(f"## {title}")
+            lines.append(content.strip())
+            lines.append("")
+
+    add_section("Market Analysis", final_state.get("market_report"))
+    add_section("Social Sentiment", final_state.get("sentiment_report"))
+    add_section("News Analysis", final_state.get("news_report"))
+    add_section("Fundamentals", final_state.get("fundamentals_report"))
+
+    debate_state = final_state.get("investment_debate_state") or {}
+    add_section("Bull Researcher", debate_state.get("bull_history"))
+    add_section("Bear Researcher", debate_state.get("bear_history"))
+    add_section("Research Manager Decision", debate_state.get("judge_decision"))
+
+    add_section("Trading Plan", final_state.get("trader_investment_plan"))
+
+    risk_state = final_state.get("risk_debate_state") or {}
+    add_section("Aggressive (Risky) Analyst", risk_state.get("risky_history"))
+    add_section("Neutral Analyst", risk_state.get("neutral_history"))
+    add_section("Conservative (Safe) Analyst", risk_state.get("safe_history"))
+    add_section("Risk Committee Outcome", risk_state.get("judge_decision"))
+
+    add_section("Final Portfolio Decision", final_state.get("final_trade_decision"))
+
+    lines.append("## Portfolio Impact")
+    impact_rows = [
+        ("Action", decision or "Pending"),
+        ("Portfolio Guidance", risk_state.get("judge_decision") or "See decision text"),
+        ("Execution Notes", final_state.get("final_trade_decision", "N/A")),
+    ]
+    lines.extend(_format_markdown_table(impact_rows))
+    lines.append("")
+
+    tool_counter = Counter(name for _, name, _ in message_buffer.tool_calls)
+    if tool_counter:
+        lines.append("## Tool Usage Summary")
+        tool_rows = [(tool, str(count)) for tool, count in tool_counter.most_common()]
+        lines.extend(_format_markdown_table(tool_rows))
+        lines.append("")
+
+    reasoning_entries = _get_reasoning_entries(message_buffer)
+    tool_entries = _get_tool_log_entries(message_buffer)
+
+    lines.append("## Trace Appendix")
+    if reasoning_entries:
+        lines.append("### Reasoning Timeline (most recent)")
+        for timestamp, _, content in reasoning_entries:
+            lines.append(f"- **{timestamp}** — {content.strip()}")
+        lines.append("")
+    if tool_entries:
+        lines.append("### Tool Calls")
+        for timestamp, tool_name, args in tool_entries:
+            arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
+            lines.append(f"- **{timestamp}** — `{tool_name}` ({arg_str})")
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _latex_escape(text):
+    replacements = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    for src, repl in replacements.items():
+        text = text.replace(src, repl)
+    return text
+
+
+def _latex_table(rows):
+    lines = [r"\begin{tabular}{p{0.3\linewidth} p{0.6\linewidth}}", r"\textbf{Metric} & \textbf{Value} \\ \hline"]
+    for metric, value in rows:
+        value = _latex_escape(value or "-" ).replace("\n", " \\ ")
+        lines.append(f"{_latex_escape(metric)} & {value} \")
+    lines.append(r"\end{tabular}")
+    return lines
+
+
+def _build_latex_report(final_state, selections, decision, message_buffer, config):
+    def latex_section(title, content):
+        if not content:
+            return []
+        body = _latex_escape(content)
+        return [f"\\section*{{{_latex_escape(title)}}}", body, ""]
+
+    lines = [
+        r"\documentclass{article}",
+        r"\usepackage[margin=1in]{geometry}",
+        r"\usepackage{parskip}",
+        r"\begin{document}",
+        fr"\section*{{TradingAgents Report for {_latex_escape(selections['ticker'])} ({_latex_escape(selections['analysis_date'])})}}",
+        r"\subsection*{Configuration}",
+        r"\begin{itemize}",
+        fr"\item LLM Provider: {_latex_escape(selections['llm_provider'].title())}",
+        fr"\item Quick-Thinking Model: {_latex_escape(selections['shallow_thinker'])}",
+        fr"\item Deep-Thinking Model: {_latex_escape(selections['deep_thinker'])}",
+        fr"\item Lookback Window: {selections['lookback_days']} days",
+        r"\end{itemize}",
+        "",
+    ]
+
+    key_rows = [
+        ("Ticker", selections["ticker"]),
+        ("Trade Date", selections["analysis_date"]),
+        ("Final Decision", decision or "N/A"),
+        ("Quick-Thinking Model", selections["shallow_thinker"]),
+        ("Deep-Thinking Model", selections["deep_thinker"]),
+        ("Research Depth", selections.get("research_depth", "-")),
+        ("Lookback Window", f"{selections['lookback_days']} days"),
+        ("Analysts Engaged", ", ".join(a.value for a in selections["analysts"])),
+    ]
+    lines.append(r"\subsection*{Key Metrics}")
+    lines.extend(_latex_table(key_rows))
+    lines.append("")
+
+    if config.get("data_vendors"):
+        lines.append(r"\subsection*{Data Vendors}")
+        lines.append(r"\begin{itemize}")
+        for category, vendor in config["data_vendors"].items():
+            lines.append(fr"\item {_latex_escape(category)} \rightarrow {_latex_escape(vendor)}")
+        if config.get("tool_vendors"):
+            lines.append(r"\item Overrides:")
+            lines.append(r"\begin{itemize}")
+            for tool, vendor in config["tool_vendors"].items():
+                lines.append(fr"\item {_latex_escape(tool)} \rightarrow {_latex_escape(vendor)}")
+            lines.append(r"\end{itemize}")
+        lines.append(r"\end{itemize}")
+        lines.append("")
+
+    sections = [
+        ("Market Analysis", final_state.get("market_report")),
+        ("Social Sentiment", final_state.get("sentiment_report")),
+        ("News Analysis", final_state.get("news_report")),
+        ("Fundamentals", final_state.get("fundamentals_report")),
+    ]
+
+    debate_state = final_state.get("investment_debate_state") or {}
+    sections.extend(
+        [
+            ("Bull Researcher", debate_state.get("bull_history")),
+            ("Bear Researcher", debate_state.get("bear_history")),
+            ("Research Manager Decision", debate_state.get("judge_decision")),
+        ]
+    )
+
+    sections.append(("Trading Plan", final_state.get("trader_investment_plan")))
+
+    risk_state = final_state.get("risk_debate_state") or {}
+    sections.extend(
+        [
+            ("Aggressive (Risky) Analyst", risk_state.get("risky_history")),
+            ("Neutral Analyst", risk_state.get("neutral_history")),
+            ("Conservative (Safe) Analyst", risk_state.get("safe_history")),
+            ("Risk Committee Outcome", risk_state.get("judge_decision")),
+        ]
+    )
+
+    sections.append(("Final Portfolio Decision", final_state.get("final_trade_decision")))
+
+    for title, content in sections:
+        lines.extend(latex_section(title, content))
+
+    risk_state = final_state.get("risk_debate_state") or {}
+    lines.append(r"\subsection*{Portfolio Impact}")
+    impact_rows = [
+        ("Action", decision or "Pending"),
+        ("Portfolio Guidance", risk_state.get("judge_decision") or "See decision text"),
+        ("Execution Notes", final_state.get("final_trade_decision", "N/A")),
+    ]
+    lines.extend(_latex_table(impact_rows))
+    lines.append("")
+
+    tool_counter = Counter(name for _, name, _ in message_buffer.tool_calls)
+    if tool_counter:
+        lines.append(r"\subsection*{Tool Usage Summary}")
+        tool_rows = [(tool, str(count)) for tool, count in tool_counter.most_common()]
+        lines.extend(_latex_table(tool_rows))
+        lines.append("")
+
+    reasoning_entries = _get_reasoning_entries(message_buffer)
+    tool_entries = _get_tool_log_entries(message_buffer)
+
+    if reasoning_entries:
+        lines.append(r"\subsection*{Reasoning Timeline}")
+        lines.append(r"\begin{itemize}")
+        for timestamp, _, content in reasoning_entries:
+            lines.append(fr"\item \textbf{{{_latex_escape(timestamp)}}} -- {_latex_escape(content)}")
+        lines.append(r"\end{itemize}")
+        lines.append("")
+
+    if tool_entries:
+        lines.append(r"\subsection*{Tool Call Log}")
+        lines.append(r"\begin{itemize}")
+        for timestamp, tool_name, args in tool_entries:
+            arg_str = ", ".join(f"{k}={v}" for k, v in args.items())
+            lines.append(fr"\item \textbf{{{_latex_escape(timestamp)}}} -- \texttt{{{_latex_escape(tool_name)}}} ({_latex_escape(arg_str)})")
+        lines.append(r"\end{itemize}")
+        lines.append("")
+
+    lines.append(r"\end{document}")
+    return "\n".join(lines)
+
+
+def save_structured_reports(final_state, selections, report_dir, message_buffer, decision, config):
+    markdown_report = _build_markdown_report(final_state, selections, decision, message_buffer, config)
+    latex_report = _build_latex_report(final_state, selections, decision, message_buffer, config)
+
+    (report_dir / "final_report.md").write_text(markdown_report)
+    (report_dir / "final_report.tex").write_text(latex_report)
+    console.print(
+        f"[green]Saved structured reports to {report_dir}[/green]",
+    )
+
+
 def update_research_team_status(status):
     """Update status for all research team members and trader."""
     research_team = ["Bull Researcher", "Bear Researcher", "Research Manager", "Trader"]
@@ -1126,6 +1399,7 @@ def run_analysis():
 
         # Display the complete final report
         display_complete_report(final_state)
+        save_structured_reports(final_state, selections, report_dir, message_buffer, decision, config)
 
         update_display(layout)
 

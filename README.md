@@ -114,7 +114,7 @@ pip install -r requirements.txt
 
 ### Required APIs
 
-You will need an API key for whichever LLM provider you select plus an [Alpha Vantage API](https://www.alphavantage.co/support/#api-key) key for fundamental and news data (default configuration). TradingAgents now loads provider-specific environment variables so you can keep tokens separated.
+You will need an API key for whichever LLM provider you select plus an [Alpha Vantage API](https://www.alphavantage.co/support/#api-key) key for fundamental and news data (default configuration). TradingAgents now loads provider-specific environment variables so you can keep tokens separated. If you choose OpenRouter for the LLMs, keep `OPENAI_API_KEY` populated as well—the research/news dataflows call OpenAI’s native Responses API regardless of the chat provider.
 
 ```bash
 export OPENAI_API_KEY=$YOUR_OPENAI_API_KEY

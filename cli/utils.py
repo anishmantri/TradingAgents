@@ -128,8 +128,10 @@ def select_shallow_thinking_agent(provider) -> str:
     # Define shallow thinking llm engine options with their corresponding model names
     SHALLOW_AGENT_OPTIONS = {
         "openai": [
-            ("GPT-5.1 Mini - Latest lightweight 5-series model", "gpt-5.1-mini"),
-            ("GPT-5.1 - Flagship general model", "gpt-5.1"),
+            ("GPT-5.1 Mini - Lightweight frontier reasoning", "gpt-5.1-mini"),
+            ("GPT-5.1 - Flagship frontier model", "gpt-5.1"),
+            ("GPT-5 Mini - Efficient 5-series option", "gpt-5-mini"),
+            ("GPT-5 - General-purpose 5-series model", "gpt-5"),
             ("GPT-4.1 Mini - Balanced lightweight model", "gpt-4.1-mini"),
             ("GPT-4.1 - Proven general-purpose model", "gpt-4.1"),
             ("GPT-4o Mini - Fast multi-modal option", "gpt-4o-mini"),
@@ -147,6 +149,8 @@ def select_shallow_thinking_agent(provider) -> str:
             ("Gemini 2.5 Flash Preview - Adaptive lightweight reasoning", "gemini-2.5-flash-preview-05-20"),
         ],
         "openrouter": [
+            ("OpenAI GPT-5.1 - Flagship general model", "openai/gpt-5.1"),
+            ("OpenAI GPT-5 Mini - Lightweight 5-series option", "openai/gpt-5-mini"),
             ("Gemini 2.0 Flash Experimental (free)", "google/gemini-2.0-flash-exp:free"),
             ("Grok 4.1 Fast (free) - xAI agentic model", "x-ai/grok-4.1-fast:free"),
             ("Kimi K2 Thinking - MoonshotAI reasoning tuned", "moonshotai/kimi-k2-thinking"),
@@ -189,12 +193,14 @@ def select_deep_thinking_agent(provider) -> str:
     # Define deep thinking llm engine options with their corresponding model names
     DEEP_AGENT_OPTIONS = {
         "openai": [
+            ("GPT-5.1 Pro - Frontier long-form reasoning", "gpt-5.1-pro"),
+            ("GPT-5 Pro - Heavyweight reasoning", "gpt-5-pro"),
+            ("GPT-5.1 - Flagship generalist", "gpt-5.1"),
+            ("GPT-5 - Advanced 5-series generalist", "gpt-5"),
             ("o4-mini - Latest compact reasoning model", "o4-mini"),
             ("o3-mini - Advanced lightweight reasoning", "o3-mini"),
             ("o1 - Premier reasoning and problem-solving model", "o1"),
-            ("GPT-5.1 Pro - Frontier long-form reasoning", "gpt-5.1-pro"),
-            ("GPT-5.1 - Full-featured generalist", "gpt-5.1"),
-            ("GPT-4.1 - Prior generation generalist", "gpt-4.1"),
+            ("GPT-4.1 - Full-featured generalist", "gpt-4.1"),
         ],
         "anthropic": [
             ("Claude 3.7 Sonnet (latest)", "claude-3-7-sonnet-latest"),
@@ -208,6 +214,8 @@ def select_deep_thinking_agent(provider) -> str:
             ("Gemini 2.5 Pro Preview", "gemini-2.5-pro-preview-06-05"),
         ],
         "openrouter": [
+            ("OpenAI GPT-5 Pro - Heavyweight reasoning", "openai/gpt-5-pro"),
+            ("OpenAI GPT-5.1 - Frontier general reasoning", "openai/gpt-5.1"),
             ("DeepSeek R1 Distill Llama 70B (free) - Deep reasoning", "deepseek/deepseek-r1-distill-llama-70b:free"),
             ("Kimi K2 Thinking - MoonshotAI frontier reasoning", "moonshotai/kimi-k2-thinking"),
             ("Prime Intellect INTELLECT-3 - 106B MoE frontier", "prime-intellect/intellect-3"),

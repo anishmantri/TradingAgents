@@ -1,3 +1,5 @@
+import os
+
 from openai import OpenAI
 
 from tradingagents.utils.provider import get_provider_api_key
@@ -6,9 +8,19 @@ from .config import get_config
 
 
 def _get_client_and_config():
+    """Return an OpenAI client pointed at the canonical OpenAI endpoint.
+
+    Even if the main LLM provider is OpenRouter or another vendor, these
+    support dataflows expect native OpenAI features (Responses API + web
+    search tool). Therefore we always route them through the OpenAI base URL
+    with the user's OPENAI_API_KEY.
+    """
+
     config = get_config()
-    client_kwargs = {"base_url": config["backend_url"]}
-    provider_key = get_provider_api_key(config["llm_provider"])
+    client_kwargs = {
+        "base_url": os.getenv("TRADINGAGENTS_OPENAI_BASE_URL", "https://api.openai.com/v1"),
+    }
+    provider_key = get_provider_api_key("openai")
     if provider_key:
         client_kwargs["api_key"] = provider_key
     return OpenAI(**client_kwargs), config

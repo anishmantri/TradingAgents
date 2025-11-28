@@ -19,6 +19,8 @@ from .managers.risk_manager import create_risk_manager
 
 from .trader.trader import create_trader
 
+from .critic_agent import create_critic_agent
+
 __all__ = [
     "FinancialSituationMemory",
     "AgentState",
@@ -28,6 +30,7 @@ __all__ = [
     "create_bear_researcher",
     "create_bull_researcher",
     "create_research_manager",
+    "create_critic_agent",
     "create_fundamentals_analyst",
     "create_market_analyst",
     "create_neutral_debator",

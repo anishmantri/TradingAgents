@@ -22,7 +22,20 @@ def create_news_analyst(llm):
 
         system_message = (
             f"You are a news researcher tasked with analyzing trading-relevant developments over the {window_desc}. Focus on news released between {window_start} and {current_date}. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            + """ 
+            
+            CRITICAL OUTPUT FORMAT:
+            You must return your final response as a JSON object with the following structure:
+            {
+                "report": "Your detailed Markdown report here...",
+                "data": {
+                    "signal": "bullish" | "bearish" | "neutral",
+                    "confidence": 0.0 to 1.0,
+                    "impact_score": 0.0 to 10.0,
+                    "key_events": ["event1", "event2"]
+                }
+            }
+            """
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -50,14 +63,33 @@ def create_news_analyst(llm):
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state["messages"])
 
-        report = ""
+        report = result.content
+        news_data = {}
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            # Try to parse JSON output
+            try:
+                content = result.content
+                json_str = content
+                if "```json" in content:
+                    json_str = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_str = content.split("```")[1].split("```")[0]
+                
+                data = json.loads(json_str.strip())
+                if isinstance(data, dict):
+                    if "report" in data:
+                        report = data["report"]
+                    if "data" in data:
+                        news_data = data["data"]
+            except Exception:
+                # Fallback to raw content if parsing fails
+                pass
 
         return {
             "messages": [result],
             "news_report": report,
+            "news_data": news_data,
         }
 
     return news_analyst_node

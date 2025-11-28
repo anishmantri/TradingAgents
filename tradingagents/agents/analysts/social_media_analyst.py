@@ -22,7 +22,20 @@ def create_social_media_analyst(llm):
 
         system_message = (
             f"You are a social media and company specific news researcher tasked with analyzing discussions, recent company news, and public sentiment for {window_desc}. Focus on activity between {window_start} and {current_date}. Use the get_news(query, start_date, end_date) tool to search for company-specific news and social media discussions. Try to look at all sources possible from social media to sentiment to news. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read.""",
+            + """ 
+            
+            CRITICAL OUTPUT FORMAT:
+            You must return your final response as a JSON object with the following structure:
+            {
+                "report": "Your detailed Markdown report here...",
+                "data": {
+                    "signal": "bullish" | "bearish" | "neutral",
+                    "confidence": 0.0 to 1.0,
+                    "sentiment_score": -1.0 to 1.0,
+                    "key_topics": ["topic1", "topic2"]
+                }
+            }
+            """,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -51,14 +64,33 @@ def create_social_media_analyst(llm):
 
         result = chain.invoke(state["messages"])
 
-        report = ""
+        report = result.content
+        sentiment_data = {}
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            # Try to parse JSON output
+            try:
+                content = result.content
+                json_str = content
+                if "```json" in content:
+                    json_str = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_str = content.split("```")[1].split("```")[0]
+                
+                data = json.loads(json_str.strip())
+                if isinstance(data, dict):
+                    if "report" in data:
+                        report = data["report"]
+                    if "data" in data:
+                        sentiment_data = data["data"]
+            except Exception:
+                # Fallback to raw content if parsing fails
+                pass
 
         return {
             "messages": [result],
             "sentiment_report": report,
+            "sentiment_data": sentiment_data,
         }
 
     return social_media_analyst_node

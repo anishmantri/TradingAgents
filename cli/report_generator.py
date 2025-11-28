@@ -29,6 +29,9 @@ class PriceSnapshot:
     three_month_return: Optional[float]
     volatility: Optional[float]
     beta: Optional[float]
+    rsi: Optional[List[float]]
+    macd: Optional[List[float]]
+    macd_signal: Optional[List[float]]
 
 
 @dataclass
@@ -265,7 +268,14 @@ def _process_bold(text: str) -> str:
     return "".join(processed)
 
 
-def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str, date_labels: bool = False) -> str:
+def _pgf_time_series(
+    coords: List[Tuple[str, float]], 
+    title: str, 
+    ylabel: str, 
+    date_labels: bool = False,
+    extra_coords: Optional[List[Tuple[str, float]]] = None,
+    legend_labels: Optional[List[str]] = None
+) -> str:
     if not coords:
         return "\\textit{Insufficient data for chart.}"
     
@@ -276,7 +286,7 @@ def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str, d
     
     points = " ".join(f"({i},{y:.2f})" for i, (_, y) in zip(xs, coords))
     
-    return (
+    latex = (
         "\\begin{tikzpicture}\n"
         "\\begin{axis}[\n"
         "    width=0.95\\linewidth,\n"
@@ -295,8 +305,19 @@ def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str, d
         "    y tick label style={/pgf/number format/fixed}\n"
         "]\n"
         f"\\addplot+[mark=*,mark size=1.5pt,thick,color=blue!70!black] coordinates {{{points}}};\n"
-        "\\end{axis}\n\\end{tikzpicture}"
     )
+    
+    if legend_labels:
+        latex += f"\\addlegendentry{{{legend_labels[0]}}}\n"
+
+    if extra_coords:
+        points2 = " ".join(f"({i},{y:.2f})" for i, (_, y) in zip(xs, extra_coords))
+        latex += f"\\addplot+[mark=none,thick,color=red!70!black] coordinates {{{points2}}};\n"
+        if legend_labels and len(legend_labels) > 1:
+            latex += f"\\addlegendentry{{{legend_labels[1]}}}\n"
+
+    latex += "\\end{axis}\n\\end{tikzpicture}"
+    return latex
 
 
 def _pgf_bar_chart(labels: Sequence[str], values: Sequence[float], title: str, ylabel: str) -> str:
@@ -333,15 +354,12 @@ def _pgf_bar_chart(labels: Sequence[str], values: Sequence[float], title: str, y
     )
 
 
-# --------------------------- Data Collection ---------------------------
-
-
 def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> PriceSnapshot:
     end_dt = pd.to_datetime(analysis_date)
     start_dt = end_dt - timedelta(days=max(lookback_days, 365))
     price_df = yf.download(ticker, start=start_dt, end=end_dt + timedelta(days=1), progress=False)
     if price_df.empty:
-        return PriceSnapshot([], [], None, None, None, None)
+        return PriceSnapshot([], [], None, None, None, None, None, None, None)
 
     if isinstance(price_df.columns, pd.MultiIndex):
         price_df.columns = price_df.columns.get_level_values(0)
@@ -350,7 +368,7 @@ def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> 
     close_candidates = ["Adj Close", "Close", "adjclose", "adj_close", "close"]
     close_col = next((c for c in close_candidates if c in price_df.columns), None)
     if not close_col:
-        return PriceSnapshot([], [], None, None, None, None)
+        return PriceSnapshot([], [], None, None, None, None, None, None, None)
 
     price_df = price_df.dropna(subset=[close_col])
     closes = price_df[close_col]
@@ -376,7 +394,35 @@ def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> 
             spy_ret = spy_df[spy_close_col].pct_change().dropna()
             beta = _compute_beta(returns, spy_ret)
 
-    return PriceSnapshot(dates=dates, closes=list(closes.values), one_year_return=ret_1y, three_month_return=ret_3m, volatility=vol, beta=beta)
+    # Technical Indicators
+    # RSI (14)
+    delta = closes.diff()
+    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+    rs = gain / loss
+    rsi_series = 100 - (100 / (1 + rs))
+    rsi = rsi_series.fillna(50).tolist() # Fill NaN with 50 (neutral)
+
+    # MACD (12, 26, 9)
+    exp1 = closes.ewm(span=12, adjust=False).mean()
+    exp2 = closes.ewm(span=26, adjust=False).mean()
+    macd_series = exp1 - exp2
+    signal_series = macd_series.ewm(span=9, adjust=False).mean()
+    
+    macd = macd_series.fillna(0).tolist()
+    macd_signal = signal_series.fillna(0).tolist()
+
+    return PriceSnapshot(
+        dates=dates, 
+        closes=list(closes.values), 
+        one_year_return=ret_1y, 
+        three_month_return=ret_3m, 
+        volatility=vol, 
+        beta=beta,
+        rsi=rsi,
+        macd=macd,
+        macd_signal=macd_signal
+    )
 
 
 def load_financial_snapshot(ticker: str) -> FinancialSnapshot:
@@ -647,6 +693,25 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     peer_ev_vals = [p.ev_ebitda or 0 for p in peers.values()] + [valuation.ev_ebitda or 0]
     valuation_chart = _pgf_bar_chart(peer_labels, peer_ev_vals, "EV/EBITDA Comparison", "Multiple (x)")
 
+    # Technical Charts
+    rsi_chart = ""
+    macd_chart = ""
+    
+    if price.rsi:
+        rsi_data = list(zip(price.dates, price.rsi))[-90:]
+        rsi_chart = _pgf_time_series(rsi_data, "RSI (14)", "RSI")
+        
+    if price.macd and price.macd_signal:
+        macd_data = list(zip(price.dates, price.macd))[-90:]
+        signal_data = list(zip(price.dates, price.macd_signal))[-90:]
+        macd_chart = _pgf_time_series(
+            macd_data, 
+            "MACD (12, 26, 9)", 
+            "Value", 
+            extra_coords=signal_data,
+            legend_labels=["MACD", "Signal"]
+        )
+
     # Content extraction
     market_report = final_state.get("market_report") or "Market context summarized by agents unavailable."
     fundamentals_report = final_state.get("fundamentals_report") or "Fundamentals summary pending from agent."
@@ -797,6 +862,19 @@ EBITDA margin trend is visualized below.
 \\centering
 {margin_chart}
 \\caption{{EBITDA Margin Trajectory}}
+\\end{{figure}}
+
+\\section{{Technical Analysis}}
+\\begin{{figure}}[H]
+\\centering
+{rsi_chart}
+\\caption{{Relative Strength Index (14)}}
+\\end{{figure}}
+
+\\begin{{figure}}[H]
+\\centering
+{macd_chart}
+\\caption{{MACD Indicator}}
 \\end{{figure}}
 
 \\section{{Valuation}}

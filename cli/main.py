@@ -395,8 +395,34 @@ def update_display(layout, spinner_text=None):
     layout["footer"].update(Panel(stats_table, border_style="grey50"))
 
 
-def get_user_selections():
+def get_user_selections(ticker: Optional[str] = None, quick: bool = False):
     """Get all user selections before starting the analysis display."""
+    if quick:
+        # Quick mode: use defaults
+        selected_ticker = ticker or get_ticker()
+        analysis_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        lookback_days = DEFAULT_CONFIG.get("analysis_window_days", 7)
+        selected_analysts = [a for a in AnalystType]
+        selected_research_depth = "comprehensive"
+        selected_llm_provider = "openai"
+        backend_url = None
+        selected_shallow_thinker = "gpt-4o-mini"
+        selected_deep_thinker = "gpt-4o"
+        
+        console.print(f"[green]Quick Start Mode:[/green] Analyzing {selected_ticker} with default settings.")
+        
+        return {
+            "ticker": selected_ticker,
+            "analysis_date": analysis_date,
+            "analysts": selected_analysts,
+            "research_depth": selected_research_depth,
+            "llm_provider": selected_llm_provider,
+            "backend_url": backend_url,
+            "shallow_thinker": selected_shallow_thinker,
+            "deep_thinker": selected_deep_thinker,
+            "lookback_days": lookback_days,
+        }
+
     # Display ASCII art welcome message
     with open("./cli/static/welcome.txt", "r") as f:
         welcome_ascii = f.read()
@@ -1042,9 +1068,9 @@ def extract_content_string(content):
     else:
         return str(content)
 
-def run_analysis():
+def run_analysis(ticker: Optional[str] = None, quick: bool = False):
     # First get all user selections
-    selections = get_user_selections()
+    selections = get_user_selections(ticker=ticker, quick=quick)
 
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
@@ -1410,8 +1436,11 @@ def run_analysis():
 
 
 @app.command()
-def analyze():
-    run_analysis()
+def analyze(
+    ticker: Optional[str] = typer.Option(None, help="Ticker symbol to analyze"),
+    quick: bool = typer.Option(False, "--quick", "-q", help="Skip questionnaire and use defaults"),
+):
+    run_analysis(ticker=ticker, quick=quick)
 
 
 if __name__ == "__main__":

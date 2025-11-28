@@ -37,6 +37,35 @@ class GraphSetup:
         self.risk_manager_memory = risk_manager_memory
         self.conditional_logic = conditional_logic
 
+    def _create_analyst_subgraph(self, analyst_type, analyst_node, tools_node, condition_method):
+        """Helper to create a subgraph for a single analyst."""
+        workflow = StateGraph(AgentState)
+        
+        # Node names
+        analyst_name = f"{analyst_type.capitalize()} Analyst"
+        tools_name = f"tools_{analyst_type}"
+        clear_name = f"Msg Clear {analyst_type.capitalize()}"
+        
+        workflow.add_node(analyst_name, analyst_node)
+        workflow.add_node(tools_name, tools_node)
+        
+        workflow.add_edge(START, analyst_name)
+        workflow.add_edge(tools_name, analyst_name)
+        
+        # Map the conditional outputs
+        # "tools_..." -> tools node
+        # "Msg Clear ..." -> END (we don't need the clear node in the subgraph, just end)
+        workflow.add_conditional_edges(
+            analyst_name,
+            condition_method,
+            {
+                tools_name: tools_name,
+                clear_name: END
+            }
+        )
+        
+        return workflow.compile()
+
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
     ):
@@ -52,40 +81,102 @@ class GraphSetup:
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
 
-        # Create analyst nodes
-        analyst_nodes = {}
-        delete_nodes = {}
-        tool_nodes = {}
+        import asyncio
 
+        # Create subgraphs for selected analysts
+        analyst_graphs = {}
+        
         if "market" in selected_analysts:
-            analyst_nodes["market"] = create_market_analyst(
-                self.quick_thinking_llm
+            analyst_graphs["market"] = self._create_analyst_subgraph(
+                "market",
+                create_market_analyst(self.quick_thinking_llm),
+                self.tool_nodes["market"],
+                self.conditional_logic.should_continue_market
             )
-            delete_nodes["market"] = create_msg_delete()
-            tool_nodes["market"] = self.tool_nodes["market"]
 
         if "social" in selected_analysts:
-            analyst_nodes["social"] = create_social_media_analyst(
-                self.quick_thinking_llm
+            analyst_graphs["social"] = self._create_analyst_subgraph(
+                "social",
+                create_social_media_analyst(self.quick_thinking_llm),
+                self.tool_nodes["social"],
+                self.conditional_logic.should_continue_social
             )
-            delete_nodes["social"] = create_msg_delete()
-            tool_nodes["social"] = self.tool_nodes["social"]
 
         if "news" in selected_analysts:
-            analyst_nodes["news"] = create_news_analyst(
-                self.quick_thinking_llm
+            analyst_graphs["news"] = self._create_analyst_subgraph(
+                "news",
+                create_news_analyst(self.quick_thinking_llm),
+                self.tool_nodes["news"],
+                self.conditional_logic.should_continue_news
             )
-            delete_nodes["news"] = create_msg_delete()
-            tool_nodes["news"] = self.tool_nodes["news"]
 
         if "fundamentals" in selected_analysts:
-            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                self.quick_thinking_llm
+            analyst_graphs["fundamentals"] = self._create_analyst_subgraph(
+                "fundamentals",
+                create_fundamentals_analyst(self.quick_thinking_llm),
+                self.tool_nodes["fundamentals"],
+                self.conditional_logic.should_continue_fundamentals
             )
-            delete_nodes["fundamentals"] = create_msg_delete()
-            tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
+
+        # Define the parallel execution node
+        async def run_analysts_parallel(state):
+            # Create a clean state for subgraphs (empty messages)
+            # We want to keep the input fields (ticker, date) but clear history
+            # Note: We must ensure we don't pass the full 'messages' history to analysts
+            # as they should start fresh.
+            sub_state = state.copy()
+            sub_state["messages"] = []
+            
+            # Prepare tasks
+            tasks = []
+            keys = []
+            
+            # Order matters for matching results to keys, though we use a dict below
+            active_analysts = [k for k in ["market", "social", "news", "fundamentals"] if k in analyst_graphs]
+            
+            for key in active_analysts:
+                tasks.append(analyst_graphs[key].ainvoke(sub_state))
+                keys.append(key)
+            
+            # Run in parallel
+            results = await asyncio.gather(*tasks)
+            
+            # Merge results
+            updates = {}
+            key_map = {
+                "market": "market",
+                "social": "sentiment",
+                "news": "news",
+                "fundamentals": "fundamentals"
+            }
+            
+            for key, res in zip(keys, results):
+                prefix = key_map.get(key, key)
+                report_key = f"{prefix}_report"
+                data_key = f"{prefix}_data"
+                
+                if report_key in res:
+                    updates[report_key] = res[report_key]
+                if data_key in res:
+                    updates[data_key] = res[data_key]
+            
+            # We also need to clear the messages from the main state effectively
+            # or rather, we just return the updates. The main state's messages 
+            # (which might be just the user input) are preserved unless we overwrite them.
+            # We probably want to clear the messages to prepare for the next stage (Bull Researcher).
+            # So we return a message removal operation or just set messages to empty?
+            # The 'create_msg_delete' used to do this.
+            # Let's return a placeholder message to keep the history clean.
+            from langchain_core.messages import HumanMessage, RemoveMessage
+            removal_operations = [RemoveMessage(id=m.id) for m in state["messages"]]
+            placeholder = HumanMessage(content="Analysts have completed their reports.")
+            
+            updates["messages"] = removal_operations + [placeholder]
+            
+            return updates
 
         # Create researcher and manager nodes
+        critic_node = create_critic_agent(self.deep_thinking_llm)
         bull_researcher_node = create_bull_researcher(
             self.quick_thinking_llm, self.bull_memory
         )
@@ -108,13 +199,9 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
-        for analyst_type, node in analyst_nodes.items():
-            workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
-            workflow.add_node(
-                f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
-            )
-            workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
+        # Add the parallel node
+        workflow.add_node("Parallel Analysts", run_analysts_parallel)
+        workflow.add_node("Critic", critic_node)
 
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
@@ -127,30 +214,12 @@ class GraphSetup:
         workflow.add_node("Risk Judge", risk_manager_node)
 
         # Define edges
-        # Start with the first analyst
-        first_analyst = selected_analysts[0]
-        workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
-
-        # Connect analysts in sequence
-        for i, analyst_type in enumerate(selected_analysts):
-            current_analyst = f"{analyst_type.capitalize()} Analyst"
-            current_tools = f"tools_{analyst_type}"
-            current_clear = f"Msg Clear {analyst_type.capitalize()}"
-
-            # Add conditional edges for current analyst
-            workflow.add_conditional_edges(
-                current_analyst,
-                getattr(self.conditional_logic, f"should_continue_{analyst_type}"),
-                [current_tools, current_clear],
-            )
-            workflow.add_edge(current_tools, current_analyst)
-
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(selected_analysts) - 1:
-                next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
-                workflow.add_edge(current_clear, next_analyst)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+        # Start -> Parallel Analysts
+        workflow.add_edge(START, "Parallel Analysts")
+        
+        # Parallel Analysts -> Critic -> Bull Researcher
+        workflow.add_edge("Parallel Analysts", "Critic")
+        workflow.add_edge("Critic", "Bull Researcher")
 
         # Add remaining edges
         workflow.add_conditional_edges(

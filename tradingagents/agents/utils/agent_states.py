@@ -55,11 +55,22 @@ class AgentState(MessagesState):
 
     # research step
     market_report: Annotated[str, "Report from the Market Analyst"]
+    market_data: Annotated[dict, "Structured data from Market Analyst"]
+
     sentiment_report: Annotated[str, "Report from the Social Media Analyst"]
+    sentiment_data: Annotated[dict, "Structured data from Social Media Analyst"]
+
     news_report: Annotated[
         str, "Report from the News Researcher of current world affairs"
     ]
+    news_data: Annotated[dict, "Structured data from News Analyst"]
+
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    fundamentals_data: Annotated[dict, "Structured data from Fundamentals Analyst"]
+
+    # critic
+    critic_report: Annotated[str, "Report from the Critic Agent"]
+    critic_data: Annotated[dict, "Structured data from Critic Agent"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

@@ -48,7 +48,19 @@ Volume-Based Indicators:
 - vwma: VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.
 
 - Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Please make sure to call get_stock_data first to retrieve the CSV that is needed to generate indicators. Then use get_indicators with the specific indicator names. Write a very detailed and nuanced report of the trends you observe. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."""
-            + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
+            + """ 
+            
+            CRITICAL OUTPUT FORMAT:
+            You must return your final response as a JSON object with the following structure:
+            {
+                "report": "Your detailed Markdown report here...",
+                "data": {
+                    "signal": "bullish" | "bearish" | "neutral",
+                    "confidence": 0.0 to 1.0,
+                    "key_metrics": { "metric_name": "value", ... }
+                }
+            }
+            """
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -77,14 +89,33 @@ Volume-Based Indicators:
 
         result = chain.invoke(state["messages"])
 
-        report = ""
+        report = result.content
+        market_data = {}
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            # Try to parse JSON output
+            try:
+                content = result.content
+                json_str = content
+                if "```json" in content:
+                    json_str = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_str = content.split("```")[1].split("```")[0]
+                
+                data = json.loads(json_str.strip())
+                if isinstance(data, dict):
+                    if "report" in data:
+                        report = data["report"]
+                    if "data" in data:
+                        market_data = data["data"]
+            except Exception:
+                # Fallback to raw content if parsing fails
+                pass
        
         return {
             "messages": [result],
             "market_report": report,
+            "market_data": market_data,
         }
 
     return market_analyst_node

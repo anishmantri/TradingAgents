@@ -25,7 +25,20 @@ def create_fundamentals_analyst(llm):
 
         system_message = (
             f"You are a researcher tasked with analyzing fundamental information over the {window_desc} (covering {window_start} to {current_date}). Please write a comprehensive report of the company's documents, profile, and financial history to inform traders. Make sure to include as much detail as possible. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
-            + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
+            + """ 
+            
+            CRITICAL OUTPUT FORMAT:
+            You must return your final response as a JSON object with the following structure:
+            {
+                "report": "Your detailed Markdown report here...",
+                "data": {
+                    "signal": "bullish" | "bearish" | "neutral",
+                    "confidence": 0.0 to 1.0,
+                    "financial_health": "strong" | "weak" | "stable",
+                    "key_ratios": { "ratio_name": "value", ... }
+                }
+            }
+            """
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements.",
         )
 
@@ -55,14 +68,33 @@ def create_fundamentals_analyst(llm):
 
         result = chain.invoke(state["messages"])
 
-        report = ""
+        report = result.content
+        fundamentals_data = {}
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            # Try to parse JSON output
+            try:
+                content = result.content
+                json_str = content
+                if "```json" in content:
+                    json_str = content.split("```json")[1].split("```")[0]
+                elif "```" in content:
+                    json_str = content.split("```")[1].split("```")[0]
+                
+                data = json.loads(json_str.strip())
+                if isinstance(data, dict):
+                    if "report" in data:
+                        report = data["report"]
+                    if "data" in data:
+                        fundamentals_data = data["data"]
+            except Exception:
+                # Fallback to raw content if parsing fails
+                pass
 
         return {
             "messages": [result],
             "fundamentals_report": report,
+            "fundamentals_data": fundamentals_data,
         }
 
     return fundamentals_analyst_node

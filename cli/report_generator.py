@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+import re
 
 import numpy as np
 import pandas as pd
@@ -38,6 +39,21 @@ class FinancialSnapshot:
     fcf_series: List[Tuple[str, float]]
     net_debt: Optional[float]
     shares_outstanding: Optional[float]
+    
+    # Snapshot values for the table
+    latest_revenue: Optional[float]
+    latest_ebitda: Optional[float]
+    latest_net_income: Optional[float]
+    gross_margin: Optional[float]
+    operating_margin: Optional[float]
+    net_margin: Optional[float]
+    
+    # Balance Sheet
+    total_cash: Optional[float]
+    total_debt: Optional[float]
+    total_assets: Optional[float]
+    total_liabilities: Optional[float]
+    equity: Optional[float]
 
 
 @dataclass
@@ -49,6 +65,7 @@ class ValuationSnapshot:
     ev_ebitda: Optional[float]
     fcf_yield: Optional[float]
     growth: Optional[float]
+    dividend_yield: Optional[float]
 
 
 @dataclass
@@ -104,12 +121,155 @@ def _compute_beta(asset_returns: pd.Series, bench_returns: pd.Series) -> Optiona
     return float(cov / var_bench)
 
 
+def _scale_series(data: List[Tuple[str, float]]) -> Tuple[List[Tuple[str, float]], str]:
+    """Scales a series of values to Billions or Millions if appropriate."""
+    if not data:
+        return [], ""
+    
+    max_val = max(abs(v) for _, v in data)
+    
+    if max_val >= 1e9:
+        return [(l, v / 1e9) for l, v in data], "($B)"
+    elif max_val >= 1e6:
+        return [(l, v / 1e6) for l, v in data], "($M)"
+    return data, ""
+
+
+def _fmt_pct(val: Optional[float]) -> str:
+    if val is None:
+        return "-"
+    return f"{val*100:.1f}\\%"
+
+
+def _fmt_curr(val: Optional[float], short: bool = False) -> str:
+    if val is None:
+        return "-"
+    if abs(val) >= 1e12:
+        return f"\\${val/1e12:,.2f}T"
+    if abs(val) >= 1e9:
+        return f"\\${val/1e9:,.2f}B"
+    if abs(val) >= 1e6:
+        return f"\\${val/1e6:,.1f}M"
+    return f"\\${val:,.0f}"
+
+
+def _latex_escape(text: str) -> str:
+    if not text:
+        return ""
+    
+    # First, handle the specific case of "newline" text artifacts
+    # If the text contains literal "newline" surrounded by spaces or at start/end, remove it
+    text = re.sub(r'\s*newline\s*', ' ', str(text), flags=re.IGNORECASE)
+    
+    replacements = {
+        "\\": r"\\textbackslash{}",
+        "&": r"\\&",
+        "%": r"\\%",
+        "$": r"\\$",
+        "#": r"\\#",
+        "_": r"\\_",
+        "{": r"\\{",
+        "}": r"\\}",
+        "~": r"\\textasciitilde{}",
+        "^": r"\\textasciicircum{}",
+        "<": r"\\textless{}",
+        ">": r"\\textgreater{}",
+    }
+    
+    safe_text = ""
+    for char in text:
+        if char in replacements:
+            safe_text += replacements[char]
+        else:
+            safe_text += char
+            
+    return safe_text
+
+
+def _latex_format_text(text: str) -> str:
+    """Parses Markdown-like text and converts it to LaTeX."""
+    if not text:
+        return ""
+    
+    # Normalize newlines
+    text = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    
+    # Remove "newline" artifacts
+    text = re.sub(r'\bnewline\b', ' ', text, flags=re.IGNORECASE)
+    
+    lines = text.split("\n")
+    formatted_lines = []
+    in_list = False
+    
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if in_list:
+                formatted_lines.append(r"\end{itemize}")
+                in_list = False
+            formatted_lines.append(r"\par\vspace{0.5em}") 
+            continue
+            
+        # Headers
+        if stripped.startswith("###"):
+            if in_list:
+                formatted_lines.append(r"\end{itemize}")
+                in_list = False
+            content = stripped.lstrip("#").strip()
+            formatted_lines.append(rf"\paragraph*{{{_latex_escape(content)}}}")
+            continue
+        elif stripped.startswith("##"):
+            if in_list:
+                formatted_lines.append(r"\end{itemize}")
+                in_list = False
+            content = stripped.lstrip("#").strip()
+            formatted_lines.append(rf"\subsubsection*{{{_latex_escape(content)}}}")
+            continue
+            
+        # List items
+        is_list_item = stripped.startswith(("- ", "* ", "• "))
+        if is_list_item:
+            content = stripped[1:].strip()
+            if not in_list:
+                formatted_lines.append(r"\begin{itemize}")
+                in_list = True
+            
+            # Handle bolding within list items
+            content = _process_bold(content)
+            formatted_lines.append(rf"\item {content}")
+        else:
+            if in_list:
+                formatted_lines.append(r"\end{itemize}")
+                in_list = False
+            
+            # Handle bolding within regular text
+            content = _process_bold(stripped)
+            formatted_lines.append(content + r" \\")
+            
+    if in_list:
+        formatted_lines.append(r"\end{itemize}")
+        
+    return "\n".join(formatted_lines)
+
+
+def _process_bold(text: str) -> str:
+    """Helper to handle **bold** text."""
+    # Split by ** to find bold parts
+    parts = text.split("**")
+    processed = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1: # Odd parts are between ** **
+            processed.append(rf"\textbf{{{_latex_escape(part)}}}")
+        else:
+            processed.append(_latex_escape(part))
+    return "".join(processed)
+
+
 def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str, date_labels: bool = False) -> str:
     if not coords:
         return "\\textit{Insufficient data for chart.}"
     
     xs = list(range(len(coords)))
-    # Reduce tick density if too many points
     step = max(1, len(coords) // 8)
     xticks = " ,".join(str(i) for i in xs[::step])
     xticklabels = " ,".join(label for label, _ in coords[::step])
@@ -130,7 +290,9 @@ def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str, d
         "    xticklabel style={rotate=45, anchor=east, font=\\footnotesize},\n"
         "    ylabel style={font=\\footnotesize},\n"
         "    title style={font=\\bfseries},\n"
-        "    legend style={at={(0.02,0.98)},anchor=north west, font=\\footnotesize}\n"
+        "    legend style={at={(0.02,0.98)},anchor=north west, font=\\footnotesize},\n"
+        "    scaled y ticks=false,\n"
+        "    y tick label style={/pgf/number format/fixed}\n"
         "]\n"
         f"\\addplot+[mark=*,mark size=1.5pt,thick,color=blue!70!black] coordinates {{{points}}};\n"
         "\\end{axis}\n\\end{tikzpicture}"
@@ -156,72 +318,19 @@ def _pgf_bar_chart(labels: Sequence[str], values: Sequence[float], title: str, y
         "    grid style={dashed,gray!30},\n"
         "    enlarge x limits=0.15,\n"
         "    nodes near coords,\n"
-        "    nodes near coords style={font=\\tiny, color=black},\n"
+        "    nodes near coords style={font=\\tiny, color=black, /pgf/number format/fixed, /pgf/number format/precision=1},\n"
         f"    title={{{{{title}}}}},\n"
         f"    ylabel={{{{{ylabel}}}}},\n"
         f"    xtick={{{{{xticks}}}}},\n"
         f"    xticklabels={{{{{xticklabels}}}}},\n"
         "    xticklabel style={rotate=45, anchor=east, font=\\footnotesize},\n"
-        "    title style={font=\\bfseries}\n"
+        "    title style={font=\\bfseries},\n"
+        "    scaled y ticks=false,\n"
+        "    y tick label style={/pgf/number format/fixed}\n"
         "]\n"
         f"\\addplot+[fill=blue!60!white, draw=blue!80!black] coordinates {{{coords}}};\n"
         "\\end{axis}\n\\end{tikzpicture}"
     )
-
-
-def _fmt_pct(val: Optional[float]) -> str:
-    if val is None:
-        return "-"
-    return f"{val*100:.1f}\\%"
-
-
-def _fmt_curr(val: Optional[float]) -> str:
-    if val is None:
-        return "-"
-    if abs(val) >= 1e9:
-        return f"\\${val/1e9:,.1f}B"
-    if abs(val) >= 1e6:
-        return f"\\${val/1e6:,.1f}M"
-    return f"\\${val:,.0f}"
-
-
-def _latex_escape(text: str) -> str:
-    if not text:
-        return ""
-    # First, normalize newlines to avoid literal "newline" text issues
-    # We replace actual newlines with a placeholder, then escape chars, then restore newlines as LaTeX breaks
-    text = str(text).replace("\r\n", "\n").replace("\r", "\n")
-    
-    replacements = {
-        "\\": r"\\textbackslash{}",
-        "&": r"\\&",
-        "%": r"\\%",
-        "$": r"\\$",
-        "#": r"\\#",
-        "_": r"\\_",
-        "{": r"\\{",
-        "}": r"\\}",
-        "~": r"\\textasciitilde{}",
-        "^": r"\\textasciicircum{}",
-        "<": r"\\textless{}",
-        ">": r"\\textgreater{}",
-    }
-    
-    # Escape special characters
-    safe_text = ""
-    for char in text:
-        if char in replacements:
-            safe_text += replacements[char]
-        else:
-            safe_text += char
-            
-    # Convert newlines to LaTeX paragraph breaks or line breaks
-    # Double newline -> paragraph break
-    # Single newline -> line break
-    safe_text = safe_text.replace("\n\n", r"\par\vspace{0.5em}")
-    safe_text = safe_text.replace("\n", r" \\ ")
-    
-    return safe_text
 
 
 # --------------------------- Data Collection ---------------------------
@@ -229,7 +338,7 @@ def _latex_escape(text: str) -> str:
 
 def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> PriceSnapshot:
     end_dt = pd.to_datetime(analysis_date)
-    start_dt = end_dt - timedelta(days=max(lookback_days, 365)) # Ensure enough history for charts
+    start_dt = end_dt - timedelta(days=max(lookback_days, 365))
     price_df = yf.download(ticker, start=start_dt, end=end_dt + timedelta(days=1), progress=False)
     if price_df.empty:
         return PriceSnapshot([], [], None, None, None, None)
@@ -257,7 +366,6 @@ def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> 
     returns = closes.pct_change().dropna()
     vol = float(returns.std() * np.sqrt(252)) if not returns.empty else None
 
-    # Beta vs SPY
     spy_df = yf.download("SPY", start=start_dt, end=end_dt + timedelta(days=1), progress=False)
     beta = None
     if not spy_df.empty:
@@ -277,6 +385,7 @@ def load_financial_snapshot(ticker: str) -> FinancialSnapshot:
     fin = getattr(tkr, "financials", pd.DataFrame())
     bs = getattr(tkr, "balance_sheet", pd.DataFrame())
     cf = getattr(tkr, "cashflow", pd.DataFrame())
+    info = getattr(tkr, "info", {}) or {}
 
     revenue_series = _clean_series(q_fin.loc["Total Revenue"]) if "Total Revenue" in q_fin.index else _clean_series(fin.loc["Total Revenue"]) if "Total Revenue" in fin.index else []
     ebitda_series = _clean_series(fin.loc["Ebitda"]) if "Ebitda" in fin.index else []
@@ -297,17 +406,28 @@ def load_financial_snapshot(ticker: str) -> FinancialSnapshot:
                 fcf_series.append((period, ocf_dict[period] + cap))
 
     net_debt = None
-    shares = None
     if "Total Debt" in bs.index and "Cash" in bs.index:
         debt_series = _clean_series(bs.loc["Total Debt"])
         cash_series = _clean_series(bs.loc["Cash"])
         if debt_series and cash_series:
             net_debt = debt_series[-1][1] - cash_series[-1][1]
 
-    try:
-        shares = _safe_float(getattr(tkr, "info", {}).get("sharesOutstanding"))
-    except Exception:
-        shares = None
+    shares = _safe_float(info.get("sharesOutstanding"))
+    
+    # Extract latest values for table
+    latest_rev = revenue_series[-1][1] if revenue_series else _safe_float(info.get("totalRevenue"))
+    latest_ebitda = ebitda_series[-1][1] if ebitda_series else _safe_float(info.get("ebitda"))
+    latest_ni = _safe_float(info.get("netIncomeToCommon"))
+    
+    gross_margin = _safe_float(info.get("grossMargins"))
+    op_margin = _safe_float(info.get("operatingMargins"))
+    net_margin = _safe_float(info.get("profitMargins"))
+    
+    total_cash = _safe_float(info.get("totalCash"))
+    total_debt = _safe_float(info.get("totalDebt"))
+    total_assets = _clean_series(bs.loc["Total Assets"])[-1][1] if "Total Assets" in bs.index else None
+    total_liab = _clean_series(bs.loc["Total Liabilities Net Minority Interest"])[-1][1] if "Total Liabilities Net Minority Interest" in bs.index else None
+    equity = _clean_series(bs.loc["Stockholders Equity"])[-1][1] if "Stockholders Equity" in bs.index else None
 
     return FinancialSnapshot(
         revenue_series=revenue_series,
@@ -316,6 +436,17 @@ def load_financial_snapshot(ticker: str) -> FinancialSnapshot:
         fcf_series=fcf_series,
         net_debt=net_debt,
         shares_outstanding=shares,
+        latest_revenue=latest_rev,
+        latest_ebitda=latest_ebitda,
+        latest_net_income=latest_ni,
+        gross_margin=gross_margin,
+        operating_margin=op_margin,
+        net_margin=net_margin,
+        total_cash=total_cash,
+        total_debt=total_debt,
+        total_assets=total_assets,
+        total_liabilities=total_liab,
+        equity=equity
     )
 
 
@@ -331,11 +462,7 @@ def load_valuation_snapshot(ticker: str, financials: FinancialSnapshot) -> Valua
     price = _safe_float(fast_info.get("last_price") or info.get("currentPrice"))
     market_cap = _safe_float(fast_info.get("market_cap") or info.get("marketCap"))
     pe = _safe_float(info.get("trailingPE") or info.get("forwardPE"))
-    ebitda = None
-    if financials.ebitda_series:
-        ebitda = financials.ebitda_series[-1][1]
-    elif info.get("ebitda"):
-        ebitda = _safe_float(info.get("ebitda"))
+    ebitda = financials.latest_ebitda or _safe_float(info.get("ebitda"))
 
     enterprise_value = _safe_float(info.get("enterpriseValue"))
     if enterprise_value is None and market_cap is not None and financials.net_debt is not None:
@@ -351,6 +478,7 @@ def load_valuation_snapshot(ticker: str, financials: FinancialSnapshot) -> Valua
         fcf_yield = fcf / market_cap
 
     growth = _safe_float(info.get("revenueGrowth"))
+    div_yield = _safe_float(info.get("dividendYield"))
 
     return ValuationSnapshot(
         price=price,
@@ -360,6 +488,7 @@ def load_valuation_snapshot(ticker: str, financials: FinancialSnapshot) -> Valua
         ev_ebitda=ev_ebitda,
         fcf_yield=fcf_yield,
         growth=growth,
+        dividend_yield=div_yield
     )
 
 
@@ -402,7 +531,7 @@ def build_scenarios(
     expected_return: float,
 ) -> List[ScenarioCase]:
     last_price = valuation.price or 0.0
-    ebitda = financials.ebitda_series[-1][1] if financials.ebitda_series else None
+    ebitda = financials.latest_ebitda
     peer_ev_ebitda_values = [m.ev_ebitda for m in peers.values() if m.ev_ebitda]
     peer_multiple = np.median(peer_ev_ebitda_values) if peer_ev_ebitda_values else valuation.ev_ebitda or 10.0
 
@@ -426,6 +555,56 @@ def build_scenarios(
 
 
 # --------------------------- Rendering ---------------------------
+
+def _render_financial_table(fin: FinancialSnapshot) -> str:
+    rows = [
+        ("Total Revenue", _fmt_curr(fin.latest_revenue)),
+        ("EBITDA", _fmt_curr(fin.latest_ebitda)),
+        ("Net Income", _fmt_curr(fin.latest_net_income)),
+        ("Gross Margin", _fmt_pct(fin.gross_margin)),
+        ("Operating Margin", _fmt_pct(fin.operating_margin)),
+        ("Net Margin", _fmt_pct(fin.net_margin)),
+    ]
+    
+    latex = "\\begin{tabular}{lr}\n\\toprule\n\\textbf{Metric} & \\textbf{Value} \\\\\n\\midrule\n"
+    for label, val in rows:
+        latex += f"{label} & {val} \\\\\n"
+    latex += "\\bottomrule\n\\end{tabular}"
+    return latex
+
+def _render_balance_sheet_table(fin: FinancialSnapshot) -> str:
+    rows = [
+        ("Total Cash", _fmt_curr(fin.total_cash)),
+        ("Total Debt", _fmt_curr(fin.total_debt)),
+        ("Net Debt", _fmt_curr(fin.net_debt)),
+        ("Total Assets", _fmt_curr(fin.total_assets)),
+        ("Total Liabilities", _fmt_curr(fin.total_liabilities)),
+        ("Stockholders Equity", _fmt_curr(fin.equity)),
+        ("Shares Outstanding", _fmt_curr(fin.shares_outstanding, short=True).replace("$", "")), # Hack to remove $ from shares
+    ]
+    
+    latex = "\\begin{tabular}{lr}\n\\toprule\n\\textbf{Item} & \\textbf{Value} \\\\\n\\midrule\n"
+    for label, val in rows:
+        latex += f"{label} & {val} \\\\\n"
+    latex += "\\bottomrule\n\\end{tabular}"
+    return latex
+
+def _render_valuation_table(val: ValuationSnapshot) -> str:
+    rows = [
+        ("Price", _fmt_curr(val.price)),
+        ("Market Cap", _fmt_curr(val.market_cap)),
+        ("Enterprise Value", _fmt_curr(val.enterprise_value)),
+        ("P/E Ratio", f"{val.pe:.1f}x" if val.pe else "-"),
+        ("EV/EBITDA", f"{val.ev_ebitda:.1f}x" if val.ev_ebitda else "-"),
+        ("FCF Yield", _fmt_pct(val.fcf_yield)),
+        ("Dividend Yield", _fmt_pct(val.dividend_yield)),
+    ]
+    
+    latex = "\\begin{tabular}{lr}\n\\toprule\n\\textbf{Metric} & \\textbf{Value} \\\\\n\\midrule\n"
+    for label, val in rows:
+        latex += f"{label} & {val} \\\\\n"
+    latex += "\\bottomrule\n\\end{tabular}"
+    return latex
 
 
 def build_latex_report(final_state: dict, selections: dict, decision: Optional[str], report_dir: Path) -> str:
@@ -454,24 +633,21 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     variant_view = "Multiple discount vs peers" if valuation.ev_ebitda and peers and any((valuation.ev_ebitda or 0) < (p.ev_ebitda or 0) for p in peers.values()) else "Growth durability versus market expectations"
 
     scenarios = build_scenarios(ticker, valuation, financials, peers, expected_return)
-    prob_weighted = sum(c.price * c.probability for c in scenarios)
-    pw_return = (prob_weighted / valuation.price - 1) if valuation.price else expected_return
-
+    
     # Chart snippets
-    # Use last 60 points for price chart to show recent trend clearly, or more if lookback is large
     price_chart_data = list(zip(price.dates, price.closes))[-90:] # Last 90 days
     price_chart = _pgf_time_series(price_chart_data, f"{ticker} Price Trend (Last 90 Days)", "Price ($)")
     
-    revenue_chart = _pgf_time_series(financials.revenue_series[-8:], "Quarterly Revenue", "Revenue ($)")
+    rev_data, rev_unit = _scale_series(financials.revenue_series[-8:])
+    revenue_chart = _pgf_time_series(rev_data, "Quarterly Revenue", f"Revenue {rev_unit}")
+    
     margin_chart = _pgf_time_series(financials.margin_series[-8:], "EBITDA Margin Trend", "Margin")
     
     peer_labels = list(peers.keys()) + [ticker]
     peer_ev_vals = [p.ev_ebitda or 0 for p in peers.values()] + [valuation.ev_ebitda or 0]
-    peer_ev_clean = [p.ev_ebitda for p in peers.values() if p.ev_ebitda]
-    peer_median_multiple = float(np.median(peer_ev_clean)) if peer_ev_clean else None
     valuation_chart = _pgf_bar_chart(peer_labels, peer_ev_vals, "EV/EBITDA Comparison", "Multiple (x)")
 
-    # Content extraction - NO TRUNCATION
+    # Content extraction
     market_report = final_state.get("market_report") or "Market context summarized by agents unavailable."
     fundamentals_report = final_state.get("fundamentals_report") or "Fundamentals summary pending from agent."
     news_report = final_state.get("news_report") or "News and catalysts collected by agents."
@@ -483,7 +659,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     for line in investment_plan.split("\n"):
         if line.strip().startswith("-"):
             thesis_points.append(line.strip("- "))
-        if len(thesis_points) >= 8: # Allow more points
+        if len(thesis_points) >= 8:
             break
     if not thesis_points:
         thesis_points = [
@@ -495,10 +671,10 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     risk_state = final_state.get("risk_debate_state", {}) or {}
     risk_notes = risk_state.get("history") or "Risk committee notes not captured."
 
+    # Scenario table
     def table_row(label: str, value: str) -> str:
         return rf"{_latex_escape(label)} & {_latex_escape(value)} \\ \hline"
 
-    # Scenario table
     scenario_rows = "\n".join(
         table_row(
             f"{case.name} ({case.probability*100:.0f}% prob)",
@@ -519,7 +695,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     peer_table = "\n".join(peer_rows) if peer_rows else "\\textit{Peer metrics unavailable.}"
 
     ev_ebitda_display = f"{valuation.ev_ebitda:.1f}" if valuation.ev_ebitda is not None else "-"
-    peer_median_display = f"{peer_median_multiple:.1f}" if peer_median_multiple is not None else "-"
+    peer_median_display = f"{np.median([p.ev_ebitda for p in peers.values() if p.ev_ebitda]):.1f}" if peers else "-"
 
     latex = f"""
 \\documentclass[11pt]{{article}}
@@ -533,7 +709,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 \\usepackage{{float}}
 \\usepackage{{titlesec}}
 \\usepackage{{pgfplots}}
-\\usepackage{{parskip}} % Better paragraph spacing
+\\usepackage{{parskip}}
 \\pgfplotsset{{compat=1.18}}
 
 % Custom section formatting
@@ -552,9 +728,9 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 \\newpage
 
 \\section{{Executive Summary}}
-\\textbf{{Recommendation:}} { _latex_escape(decision or 'Pending') }.\\\\newline
-\\textbf{{Target Return:}} {_fmt_pct(expected_return)} over ~{horizon_months} months.\\\\newline
-\\textbf{{Variant Perception:}} {_latex_escape(variant_view)}.\\\\newline
+\\textbf{{Recommendation:}} { _latex_escape(decision or 'Pending') }.\\\\
+\\textbf{{Target Return:}} {_fmt_pct(expected_return)} over ~{horizon_months} months.\\\\
+\\textbf{{Variant Perception:}} {_latex_escape(variant_view)}.\\\\
 
 \\textbf{{Upside Drivers:}}
 \\begin{{itemize}}
@@ -569,46 +745,41 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 \\textbf{{Valuation Check:}} Current EV/EBITDA is {ev_ebitda_display}x vs peer median {peer_median_display}x.
 
 \\section{{Company Overview}}
-\\textbf{{Business Description:}} { _latex_escape(fundamentals_report) }
+\\textbf{{Business Description:}} 
+\\begin{{quote}}
+{ _latex_format_text(fundamentals_report) }
+\\end{{quote}}
 
-\\textbf{{Key Stats:}}
-\\begin{{itemize}}
-\\item Latest Quarterly Revenue: {_fmt_curr(financials.revenue_series[-1][1] if financials.revenue_series else None)}
-\\item Geographic Exposure: {_latex_escape(country or 'global markets')}
-\\item Industry: {_latex_escape(industry)}
-\\end{{itemize}}
+\\subsection{{Financial Performance}}
+\\begin{{table}}[H]
+\\centering
+{_render_financial_table(financials)}
+\\caption{{Key Financial Metrics (TTM/Latest)}}
+\\end{{table}}
+
+\\subsection{{Balance Sheet Highlights}}
+\\begin{{table}}[H]
+\\centering
+{_render_balance_sheet_table(financials)}
+\\caption{{Balance Sheet Summary}}
+\\end{{table}}
 
 \\subsection{{Recent Developments}}
-{_latex_escape(news_report)}
+{_latex_format_text(news_report)}
 
 \\section{{Industry and Competitive Landscape}}
 \\textbf{{Market Drivers:}}
-{_latex_escape(market_report)}
+{_latex_format_text(market_report)}
 
 \\textbf{{Competitive Positioning:}}
-{_latex_escape(sentiment_report)}
-
-\\section{{Catalysts}}
-\\textbf{{Upcoming Events:}}
-\\begin{{itemize}}
-\\item Earnings cadence and guidance updates
-\\item Product launches or regulatory decisions
-\\item Macroeconomic shifts affecting the { _latex_escape(sector) } sector
-\\end{{itemize}}
+{_latex_format_text(sentiment_report)}
 
 \\section{{Financial Analysis}}
 \\textbf{{Revenue & Growth:}}
-Recent run-rate revenue is {_fmt_curr(financials.revenue_series[-1][1] if financials.revenue_series else None)} with estimated growth of {_fmt_pct(valuation.growth)}.
+Recent run-rate revenue is {_fmt_curr(financials.latest_revenue)} with estimated growth of {_fmt_pct(valuation.growth)}.
 
 \\textbf{{Profitability:}}
 EBITDA margin trend is visualized below.
-
-\\textbf{{Balance Sheet & Cash Flow:}}
-\\begin{{itemize}}
-\\item FCF: {_fmt_curr(financials.fcf_series[-1][1] if financials.fcf_series else None)}
-\\item Net Debt: {_fmt_curr(financials.net_debt)}
-\\item Shares Outstanding: {_fmt_curr(financials.shares_outstanding)}
-\\end{{itemize}}
 
 \\begin{{figure}}[H]
 \\centering
@@ -629,15 +800,11 @@ EBITDA margin trend is visualized below.
 \\end{{figure}}
 
 \\section{{Valuation}}
-\\textbf{{Current Metrics:}}
-\\begin{{itemize}}
-\\item Price: {_fmt_curr(valuation.price)}
-\\item Market Cap: {_fmt_curr(valuation.market_cap)}
-\\item Enterprise Value: {_fmt_curr(valuation.enterprise_value)}
-\\item P/E Ratio: {_fmt_pct(valuation.pe)}
-\\item EV/EBITDA: {ev_ebitda_display}x
-\\item FCF Yield: {_fmt_pct(valuation.fcf_yield)}
-\\end{{itemize}}
+\\begin{{table}}[H]
+\\centering
+{_render_valuation_table(valuation)}
+\\caption{{Valuation Metrics}}
+\\end{{table}}
 
 \\begin{{figure}}[H]
 \\centering
@@ -659,13 +826,8 @@ EBITDA margin trend is visualized below.
 {''.join(f"\\item {_latex_escape(pt)}\n" for pt in thesis_points)}
 \\end{{itemize}}
 
-\\section{{Variant View}}
-\\textbf{{Our Edge:}} {_latex_escape(variant_view)}.
-The market may be underestimating the durability of growth or the impact of recent efficiency measures compared to the { _latex_escape(sector) } sector average.
-
 \\section{{Risks and Disconfirming Evidence}}
-\\textbf{{Key Risks:}}
-{_latex_escape(risk_notes)}
+{_latex_format_text(risk_notes)}
 
 \\section{{Appendix}}
 \\subsection{{Peer Comparison}}
@@ -717,7 +879,7 @@ def build_markdown_report(final_state: dict, selections: dict, decision: Optiona
     pw_return = (prob_weighted / valuation.price - 1) if valuation.price else expected_return
     ev_ebitda_display = f"{valuation.ev_ebitda:.1f}" if valuation.ev_ebitda is not None else "-"
 
-    # Content extraction - NO TRUNCATION
+    # Content extraction
     market_report = final_state.get("market_report") or "Market context summarized by agents unavailable."
     fundamentals_report = final_state.get("fundamentals_report") or "Fundamentals summary pending from agent."
     news_report = final_state.get("news_report") or "News and catalysts collected by agents."

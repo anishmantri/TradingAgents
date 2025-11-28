@@ -14,8 +14,8 @@ def test_report_generation():
     
     # Mock data
     final_state = {
-        "market_report": "Market is bullish.",
-        "fundamentals_report": "Company is strong.",
+        "market_report": "- Market is bullish.\n- Trend is up.",
+        "fundamentals_report": "Company is strong.\n* Good management.\n* High margins.",
         "news_report": "New product launch.",
         "sentiment_report": "Positive sentiment.",
         "final_trade_decision": "BUY",
@@ -37,17 +37,6 @@ def test_report_generation():
         shutil.rmtree(report_dir)
     report_dir.mkdir()
 
-    # Mock yfinance data loading by patching (or just relying on the fact that we can't easily mock yfinance here without more work)
-    # However, the functions in report_generator.py call yfinance. 
-    # To properly test without network calls, we would need to mock yfinance.
-    # For now, let's just try to import and run it, but we might hit network issues or empty data.
-    # Actually, the user's request implies they want me to fix the *formatting* error.
-    # The formatting error happened *after* data was loaded.
-    
-    # Let's try to call build_latex_report. 
-    # Since it calls load_price_snapshot etc internally, it will try to fetch data.
-    # I should probably mock those load_* functions in report_generator.py for this test.
-    
     import cli.report_generator as rg
     from unittest.mock import MagicMock
     
@@ -62,12 +51,23 @@ def test_report_generation():
     ))
     
     rg.load_financial_snapshot = MagicMock(return_value=FinancialSnapshot(
-        revenue_series=[("2024-Q1", 1000.0), ("2024-Q2", 1100.0)],
-        ebitda_series=[("2024-Q1", 200.0), ("2024-Q2", 220.0)],
+        revenue_series=[("2024-Q1", 1.0e9), ("2024-Q2", 1.1e9)], # Billions
+        ebitda_series=[("2024-Q1", 200.0e6), ("2024-Q2", 220.0e6)], # Millions
         margin_series=[("2024-Q1", 0.2), ("2024-Q2", 0.2)],
-        fcf_series=[("2024-Q1", 50.0)],
-        net_debt=500.0,
-        shares_outstanding=100.0
+        fcf_series=[("2024-Q1", 50.0e6)],
+        net_debt=500.0e6,
+        shares_outstanding=100.0e6,
+        latest_revenue=1.1e9,
+        latest_ebitda=220.0e6,
+        latest_net_income=150.0e6,
+        gross_margin=0.4,
+        operating_margin=0.25,
+        net_margin=0.15,
+        total_cash=100.0e6,
+        total_debt=600.0e6,
+        total_assets=2.0e9,
+        total_liabilities=1.0e9,
+        equity=1.0e9
     ))
     
     rg.load_valuation_snapshot = MagicMock(return_value=ValuationSnapshot(
@@ -77,7 +77,8 @@ def test_report_generation():
         pe=20.0,
         ev_ebitda=15.0,
         fcf_yield=0.04,
-        growth=0.1
+        growth=0.1,
+        dividend_yield=0.02
     ))
     
     rg.load_peers_metrics = MagicMock(return_value={
@@ -88,7 +89,8 @@ def test_report_generation():
             pe=25.0,
             ev_ebitda=18.0,
             fcf_yield=0.03,
-            growth=0.08
+            growth=0.08,
+            dividend_yield=0.015
         )
     })
     
@@ -121,6 +123,25 @@ def test_report_generation():
         # Check for PGFPlots enhancements
         assert "grid style={dashed,gray!30}" in latex
         assert "nodes near coords" in latex
+        
+        # Check for structured tables
+        assert "\\begin{tabular}" in latex
+        assert "Total Revenue" in latex
+        assert "Gross Margin" in latex
+        
+        # Check for advanced text parsing
+        # "### Market Context" -> \paragraph*{Market Context} or similar
+        # We mocked market_report as "- Market is bullish." so let's check for itemize
+        assert "\\begin{itemize}" in latex
+        assert "\\item Market is bullish." in latex
+        
+        # Check for bolding in lists or text
+        # We mocked fundamentals_report with "* Good management."
+        assert "\\item Good management." in latex
+        
+        # Check for unit scaling in tables
+        # Revenue was 1.0e9 -> $1.00B
+        assert "1.00B" in latex or "1.0B" in latex
 
         # Test Markdown Report as well
         markdown = build_markdown_report(final_state, selections, decision)

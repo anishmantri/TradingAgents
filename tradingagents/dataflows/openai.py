@@ -21,6 +21,11 @@ def _get_client_and_config():
         "base_url": os.getenv("TRADINGAGENTS_OPENAI_BASE_URL", "https://api.openai.com/v1"),
     }
     provider_key = get_provider_api_key("openai")
+    if not provider_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is required for news/fundamentals dataflows. "
+            "Set it in your environment or .env even if you use another LLM provider."
+        )
     if provider_key:
         client_kwargs["api_key"] = provider_key
     return OpenAI(**client_kwargs), config

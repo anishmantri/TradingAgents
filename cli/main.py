@@ -745,8 +745,9 @@ from collections import Counter
 def _format_markdown_table(rows):
     table = ["| Metric | Value |", "| --- | --- |"]
     for metric, value in rows:
-        value = (value or "-").replace("\n", "<br>")
-        table.append(f"| {metric} | {value} |")
+        rendered = "-" if value is None else str(value)
+        rendered = rendered.replace("\n", "<br>")
+        table.append(f"| {metric} | {rendered} |")
     return table
 
 
@@ -755,7 +756,8 @@ def _get_reasoning_entries(message_buffer, limit=10):
 
 
 def _get_tool_log_entries(message_buffer, limit=10):
-    return message_buffer.tool_calls[-limit:]
+    tool_calls = list(message_buffer.tool_calls)
+    return tool_calls[-limit:]
 
 
 def _build_markdown_report(final_state, selections, decision, message_buffer, config):
@@ -870,8 +872,9 @@ def _latex_escape(text):
 def _latex_table(rows):
     lines = [r"\begin{tabular}{p{0.3\linewidth} p{0.6\linewidth}}", r"\textbf{Metric} & \textbf{Value} \\ \hline"]
     for metric, value in rows:
-        value = _latex_escape(value or "-" ).replace("\n", " \\ ")
-        lines.append(f"{_latex_escape(metric)} & {value} \")
+        rendered = "-" if value is None else str(value)
+        rendered = _latex_escape(rendered).replace("\n", " \\ ")
+        lines.append(f"{_latex_escape(metric)} & {rendered} \\ ")
     lines.append(r"\end{tabular}")
     return lines
 

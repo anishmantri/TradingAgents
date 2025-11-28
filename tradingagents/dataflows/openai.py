@@ -1,10 +1,21 @@
 from openai import OpenAI
+
+from tradingagents.utils.provider import get_provider_api_key
+
 from .config import get_config
 
 
-def get_stock_news_openai(query, start_date, end_date):
+def _get_client_and_config():
     config = get_config()
-    client = OpenAI(base_url=config["backend_url"])
+    client_kwargs = {"base_url": config["backend_url"]}
+    provider_key = get_provider_api_key(config["llm_provider"])
+    if provider_key:
+        client_kwargs["api_key"] = provider_key
+    return OpenAI(**client_kwargs), config
+
+
+def get_stock_news_openai(query, start_date, end_date):
+    client, config = _get_client_and_config()
 
     response = client.responses.create(
         model=config["quick_think_llm"],
@@ -37,9 +48,10 @@ def get_stock_news_openai(query, start_date, end_date):
     return response.output[1].content[0].text
 
 
-def get_global_news_openai(curr_date, look_back_days=7, limit=5):
-    config = get_config()
-    client = OpenAI(base_url=config["backend_url"])
+def get_global_news_openai(curr_date, look_back_days=None, limit=5):
+    client, config = _get_client_and_config()
+    if look_back_days is None:
+        look_back_days = config.get("analysis_window_days", 7)
 
     response = client.responses.create(
         model=config["quick_think_llm"],
@@ -73,8 +85,7 @@ def get_global_news_openai(curr_date, look_back_days=7, limit=5):
 
 
 def get_fundamentals_openai(ticker, curr_date):
-    config = get_config()
-    client = OpenAI(base_url=config["backend_url"])
+    client, config = _get_client_and_config()
 
     response = client.responses.create(
         model=config["quick_think_llm"],

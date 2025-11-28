@@ -3,6 +3,7 @@ import time
 import json
 from tradingagents.agents.utils.agent_utils import get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement, get_insider_sentiment, get_insider_transactions
 from tradingagents.dataflows.config import get_config
+from tradingagents.utils.timeframes import describe_window, lookback_start
 
 
 def create_fundamentals_analyst(llm):
@@ -10,6 +11,10 @@ def create_fundamentals_analyst(llm):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
+        config = get_config()
+        lookback_days = config.get("analysis_window_days", 7)
+        window_desc = describe_window(lookback_days)
+        window_start = lookback_start(current_date, lookback_days)
 
         tools = [
             get_fundamentals,
@@ -19,7 +24,7 @@ def create_fundamentals_analyst(llm):
         ]
 
         system_message = (
-            "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
+            f"You are a researcher tasked with analyzing fundamental information over the {window_desc} (covering {window_start} to {current_date}). Please write a comprehensive report of the company's documents, profile, and financial history to inform traders. Make sure to include as much detail as possible. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements.",
         )

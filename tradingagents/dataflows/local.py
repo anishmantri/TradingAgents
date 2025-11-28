@@ -1,7 +1,7 @@
-from typing import Annotated
+from typing import Annotated, Optional
 import pandas as pd
 import os
-from .config import DATA_DIR
+from .config import DATA_DIR, get_config
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import json
@@ -367,18 +367,21 @@ def get_simfin_income_statements(
 
 def get_reddit_global_news(
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
-    look_back_days: Annotated[int, "Number of days to look back"] = 7,
+    look_back_days: Annotated[Optional[int], "Number of days to look back"] = None,
     limit: Annotated[int, "Maximum number of articles to return"] = 5,
 ) -> str:
     """
     Retrieve the latest top reddit news
     Args:
         curr_date: Current date in yyyy-mm-dd format
-        look_back_days: Number of days to look back (default 7)
+        look_back_days: Number of days to look back (defaults to CLI/config setting)
         limit: Maximum number of articles to return (default 5)
     Returns:
         str: A formatted string containing the latest news articles posts on reddit
     """
+    if look_back_days is None:
+        config = get_config()
+        look_back_days = config.get("analysis_window_days", 7)
 
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     before = curr_date_dt - relativedelta(days=look_back_days)

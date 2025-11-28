@@ -448,10 +448,21 @@ def get_user_selections():
     )
     analysis_date = get_analysis_date()
 
-    # Step 3: Select analysts
+    # Step 3: Lookback window
+    default_window = str(DEFAULT_CONFIG.get("analysis_window_days", 7))
     console.print(
         create_question_box(
-            "Step 3: Analysts Team", "Select your LLM analyst agents for the analysis"
+            "Step 3: Lookback Window",
+            "Enter how many days of history to analyze (e.g., 7 for a week, 30 for a month)",
+            f"{default_window} days",
+        )
+    )
+    lookback_days = get_analysis_window()
+
+    # Step 4: Select analysts
+    console.print(
+        create_question_box(
+            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
         )
     )
     selected_analysts = select_analysts()
@@ -459,26 +470,26 @@ def get_user_selections():
         f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
-    # Step 4: Research depth
+    # Step 5: Research depth
     console.print(
         create_question_box(
-            "Step 4: Research Depth", "Select your research depth level"
+            "Step 5: Research Depth", "Select your research depth level"
         )
     )
     selected_research_depth = select_research_depth()
 
-    # Step 5: OpenAI backend
+    # Step 6: Provider backend
     console.print(
         create_question_box(
-            "Step 5: OpenAI backend", "Select which service to talk to"
+            "Step 6: LLM Provider Backend", "Select which service to talk to"
         )
     )
     selected_llm_provider, backend_url = select_llm_provider()
     
-    # Step 6: Thinking agents
+    # Step 7: Thinking agents
     console.print(
         create_question_box(
-            "Step 6: Thinking Agents", "Select your thinking agents for analysis"
+            "Step 7: Thinking Agents", "Select your thinking agents for analysis"
         )
     )
     selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
@@ -493,6 +504,7 @@ def get_user_selections():
         "backend_url": backend_url,
         "shallow_thinker": selected_shallow_thinker,
         "deep_thinker": selected_deep_thinker,
+        "lookback_days": lookback_days,
     }
 
 
@@ -518,6 +530,23 @@ def get_analysis_date():
             console.print(
                 "[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]"
             )
+
+
+def get_analysis_window():
+    """Prompt for number of days to analyze."""
+    default_value = str(DEFAULT_CONFIG.get("analysis_window_days", 7))
+    while True:
+        response = typer.prompt("", default=default_value)
+        try:
+            lookback_days = int(response)
+            if lookback_days <= 0:
+                console.print("[red]Error: Lookback window must be a positive number of days[/red]")
+                continue
+            if lookback_days > 365:
+                console.print("[yellow]Warning: Large lookback windows may slow the analysis; continuing anyway[/yellow]")
+            return lookback_days
+        except ValueError:
+            console.print("[red]Error: Please enter a whole number of days[/red]")
 
 
 def display_complete_report(final_state):
@@ -747,6 +776,7 @@ def run_analysis():
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]
     config["llm_provider"] = selections["llm_provider"].lower()
+    config["analysis_window_days"] = selections["lookback_days"]
 
     # Initialize the graph
     graph = TradingAgentsGraph(

@@ -3,6 +3,7 @@ import time
 import json
 from tradingagents.agents.utils.agent_utils import get_stock_data, get_indicators
 from tradingagents.dataflows.config import get_config
+from tradingagents.utils.timeframes import describe_window, lookback_start
 
 
 def create_market_analyst(llm):
@@ -11,6 +12,10 @@ def create_market_analyst(llm):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
+        config = get_config()
+        lookback_days = config.get("analysis_window_days", 7)
+        window_desc = describe_window(lookback_days)
+        window_start = lookback_start(current_date, lookback_days)
 
         tools = [
             get_stock_data,
@@ -18,7 +23,7 @@ def create_market_analyst(llm):
         ]
 
         system_message = (
-            """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
+            f"""You are a trading assistant tasked with analyzing financial markets over the {window_desc}. Focus on price action between {window_start} and {current_date} when selecting data. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
 
 Moving Averages:
 - close_50_sma: 50 SMA: A medium-term trend indicator. Usage: Identify trend direction and serve as dynamic support/resistance. Tips: It lags price; combine with faster indicators for timely signals.

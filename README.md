@@ -114,14 +114,17 @@ pip install -r requirements.txt
 
 ### Required APIs
 
-You will need the OpenAI API for all the agents, and [Alpha Vantage API](https://www.alphavantage.co/support/#api-key) for fundamental and news data (default configuration).
+You will need an API key for whichever LLM provider you select plus an [Alpha Vantage API](https://www.alphavantage.co/support/#api-key) key for fundamental and news data (default configuration). TradingAgents now loads provider-specific environment variables so you can keep tokens separated.
 
 ```bash
 export OPENAI_API_KEY=$YOUR_OPENAI_API_KEY
+export OPENROUTER_API_KEY=$YOUR_OPENROUTER_API_KEY       # Only when using OpenRouter
+export ANTHROPIC_API_KEY=$YOUR_ANTHROPIC_KEY             # Only when using Anthropic
+export GOOGLE_API_KEY=$YOUR_GOOGLE_KEY                   # Only when using Google Gemini
 export ALPHA_VANTAGE_API_KEY=$YOUR_ALPHA_VANTAGE_API_KEY
 ```
 
-Alternatively, you can create a `.env` file in the project root with your API keys (see `.env.example` for reference):
+Alternatively, you can create a `.env` file in the project root with your API keys (see `.env.example` for reference). Each provider-specific variable is optional—set only the ones you need:
 ```bash
 cp .env.example .env
 # Edit .env with your actual API keys

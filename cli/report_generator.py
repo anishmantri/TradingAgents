@@ -74,7 +74,7 @@ def _safe_float(value: object) -> Optional[float]:
         return None
 
 
-def _clean_series(series: pd.Series, limit: int = 6) -> List[Tuple[str, float]]:
+def _clean_series(series: pd.Series, limit: int = 12) -> List[Tuple[str, float]]:
     if series is None or series.empty:
         return []
     ordered = series.dropna()
@@ -104,20 +104,35 @@ def _compute_beta(asset_returns: pd.Series, bench_returns: pd.Series) -> Optiona
     return float(cov / var_bench)
 
 
-def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str) -> str:
+def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str, date_labels: bool = False) -> str:
     if not coords:
         return "\\textit{Insufficient data for chart.}"
+    
     xs = list(range(len(coords)))
-    xticks = " ,".join(str(i) for i in xs)
-    xticklabels = " ,".join(label for label, _ in coords)
+    # Reduce tick density if too many points
+    step = max(1, len(coords) // 8)
+    xticks = " ,".join(str(i) for i in xs[::step])
+    xticklabels = " ,".join(label for label, _ in coords[::step])
+    
     points = " ".join(f"({i},{y:.2f})" for i, (_, y) in zip(xs, coords))
+    
     return (
         "\\begin{tikzpicture}\n"
-        "\\begin{axis}[width=0.95\\linewidth,height=6cm,grid=both,"
-        f"title={{{{title}}}},ylabel={{{{ylabel}}}},xtick={{{{ {xticks} }}}},"
-        f"xticklabels={{{{{xticklabels}}}}},xticklabel style={{rotate=45, anchor=east}},"
-        "ymajorgrids,xmajorgrids,legend style={at={(0.02,0.98)},anchor=north west}]\n"
-        f"\\addplot+[mark=*,thick,color=blue] coordinates {{{points}}};\n"
+        "\\begin{axis}[\n"
+        "    width=0.95\\linewidth,\n"
+        "    height=6cm,\n"
+        "    grid=both,\n"
+        "    grid style={dashed,gray!30},\n"
+        f"    title={{{{{title}}}}},\n"
+        f"    ylabel={{{{{ylabel}}}}},\n"
+        f"    xtick={{{{{xticks}}}}},\n"
+        f"    xticklabels={{{{{xticklabels}}}}},\n"
+        "    xticklabel style={rotate=45, anchor=east, font=\\footnotesize},\n"
+        "    ylabel style={font=\\footnotesize},\n"
+        "    title style={font=\\bfseries},\n"
+        "    legend style={at={(0.02,0.98)},anchor=north west, font=\\footnotesize}\n"
+        "]\n"
+        f"\\addplot+[mark=*,mark size=1.5pt,thick,color=blue!70!black] coordinates {{{points}}};\n"
         "\\end{axis}\n\\end{tikzpicture}"
     )
 
@@ -125,16 +140,31 @@ def _pgf_time_series(coords: List[Tuple[str, float]], title: str, ylabel: str) -
 def _pgf_bar_chart(labels: Sequence[str], values: Sequence[float], title: str, ylabel: str) -> str:
     if not labels or not values:
         return "\\textit{Insufficient data for chart.}"
+    
     coords = " ".join(f"({i},{v:.2f})" for i, v in enumerate(values))
     xticks = " ,".join(str(i) for i in range(len(labels)))
     xticklabels = " ,".join(labels)
+    
     return (
         "\\begin{tikzpicture}\n"
-        "\\begin{axis}[ybar,bar width=12pt,width=0.95\\linewidth,height=6cm,"
-        "grid=both,enlarge x limits=0.15,"
-        f"title={{{{title}}}},ylabel={{{{ylabel}}}},xtick={{{{ {xticks} }}}},"
-        f"xticklabels={{{{{xticklabels}}}}},xticklabel style={{rotate=45, anchor=east}}]\n"
-        f"\\addplot+[fill=blue!65] coordinates {{{coords}}};\n"
+        "\\begin{axis}[\n"
+        "    ybar,\n"
+        "    bar width=15pt,\n"
+        "    width=0.95\\linewidth,\n"
+        "    height=6cm,\n"
+        "    grid=major,\n"
+        "    grid style={dashed,gray!30},\n"
+        "    enlarge x limits=0.15,\n"
+        "    nodes near coords,\n"
+        "    nodes near coords style={font=\\tiny, color=black},\n"
+        f"    title={{{{{title}}}}},\n"
+        f"    ylabel={{{{{ylabel}}}}},\n"
+        f"    xtick={{{{{xticks}}}}},\n"
+        f"    xticklabels={{{{{xticklabels}}}}},\n"
+        "    xticklabel style={rotate=45, anchor=east, font=\\footnotesize},\n"
+        "    title style={font=\\bfseries}\n"
+        "]\n"
+        f"\\addplot+[fill=blue!60!white, draw=blue!80!black] coordinates {{{coords}}};\n"
         "\\end{axis}\n\\end{tikzpicture}"
     )
 
@@ -142,20 +172,26 @@ def _pgf_bar_chart(labels: Sequence[str], values: Sequence[float], title: str, y
 def _fmt_pct(val: Optional[float]) -> str:
     if val is None:
         return "-"
-    return f"{val*100:.1f}%"
+    return f"{val*100:.1f}\\%"
 
 
 def _fmt_curr(val: Optional[float]) -> str:
     if val is None:
         return "-"
     if abs(val) >= 1e9:
-        return f"${val/1e9:,.1f}B"
+        return f"\\${val/1e9:,.1f}B"
     if abs(val) >= 1e6:
-        return f"${val/1e6:,.1f}M"
-    return f"${val:,.0f}"
+        return f"\\${val/1e6:,.1f}M"
+    return f"\\${val:,.0f}"
 
 
 def _latex_escape(text: str) -> str:
+    if not text:
+        return ""
+    # First, normalize newlines to avoid literal "newline" text issues
+    # We replace actual newlines with a placeholder, then escape chars, then restore newlines as LaTeX breaks
+    text = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    
     replacements = {
         "\\": r"\\textbackslash{}",
         "&": r"\\&",
@@ -167,10 +203,25 @@ def _latex_escape(text: str) -> str:
         "}": r"\\}",
         "~": r"\\textasciitilde{}",
         "^": r"\\textasciicircum{}",
+        "<": r"\\textless{}",
+        ">": r"\\textgreater{}",
     }
-    for src, repl in replacements.items():
-        text = text.replace(src, repl)
-    return text
+    
+    # Escape special characters
+    safe_text = ""
+    for char in text:
+        if char in replacements:
+            safe_text += replacements[char]
+        else:
+            safe_text += char
+            
+    # Convert newlines to LaTeX paragraph breaks or line breaks
+    # Double newline -> paragraph break
+    # Single newline -> line break
+    safe_text = safe_text.replace("\n\n", r"\par\vspace{0.5em}")
+    safe_text = safe_text.replace("\n", r" \\ ")
+    
+    return safe_text
 
 
 # --------------------------- Data Collection ---------------------------
@@ -178,7 +229,7 @@ def _latex_escape(text: str) -> str:
 
 def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> PriceSnapshot:
     end_dt = pd.to_datetime(analysis_date)
-    start_dt = end_dt - timedelta(days=max(lookback_days, 120))
+    start_dt = end_dt - timedelta(days=max(lookback_days, 365)) # Ensure enough history for charts
     price_df = yf.download(ticker, start=start_dt, end=end_dt + timedelta(days=1), progress=False)
     if price_df.empty:
         return PriceSnapshot([], [], None, None, None, None)
@@ -210,8 +261,12 @@ def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> 
     spy_df = yf.download("SPY", start=start_dt, end=end_dt + timedelta(days=1), progress=False)
     beta = None
     if not spy_df.empty:
-        spy_ret = spy_df["Close"].pct_change().dropna()
-        beta = _compute_beta(returns, spy_ret)
+        if isinstance(spy_df.columns, pd.MultiIndex):
+            spy_df.columns = spy_df.columns.get_level_values(0)
+        spy_close_col = next((c for c in close_candidates if c in spy_df.columns), None)
+        if spy_close_col:
+            spy_ret = spy_df[spy_close_col].pct_change().dropna()
+            beta = _compute_beta(returns, spy_ret)
 
     return PriceSnapshot(dates=dates, closes=list(closes.values), one_year_return=ret_1y, three_month_return=ret_3m, volatility=vol, beta=beta)
 
@@ -312,7 +367,7 @@ def peer_list(sector: str, ticker: str) -> List[str]:
     sector_peers = {
         "Technology": ["AAPL", "MSFT", "GOOGL", "AMZN"],
         "Communication Services": ["GOOGL", "META", "NFLX", "TMUS"],
-        "Consumer Cyclical": ["AMZN", "HD", "LOW", "NKE"],
+        "Consumer Cyclical": ["AMZN", "HD", "LOW", "NKE", "TSLA", "F", "GM"],
         "Consumer Defensive": ["PG", "KO", "PEP", "WMT"],
         "Energy": ["XOM", "CVX", "COP", "SLB"],
         "Financial Services": ["JPM", "BAC", "WFC", "GS"],
@@ -403,33 +458,32 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     pw_return = (prob_weighted / valuation.price - 1) if valuation.price else expected_return
 
     # Chart snippets
-    price_chart = _pgf_time_series(list(zip(price.dates[-24:], price.closes[-24:])), f"{ticker} price trend", "Price")
-    revenue_chart = _pgf_time_series(financials.revenue_series[-6:], "Revenue trend", "$m")
-    margin_chart = _pgf_time_series(financials.margin_series[-6:], "EBITDA margin", "Margin")
+    # Use last 60 points for price chart to show recent trend clearly, or more if lookback is large
+    price_chart_data = list(zip(price.dates, price.closes))[-90:] # Last 90 days
+    price_chart = _pgf_time_series(price_chart_data, f"{ticker} Price Trend (Last 90 Days)", "Price ($)")
+    
+    revenue_chart = _pgf_time_series(financials.revenue_series[-8:], "Quarterly Revenue", "Revenue ($)")
+    margin_chart = _pgf_time_series(financials.margin_series[-8:], "EBITDA Margin Trend", "Margin")
+    
     peer_labels = list(peers.keys()) + [ticker]
     peer_ev_vals = [p.ev_ebitda or 0 for p in peers.values()] + [valuation.ev_ebitda or 0]
     peer_ev_clean = [p.ev_ebitda for p in peers.values() if p.ev_ebitda]
     peer_median_multiple = float(np.median(peer_ev_clean)) if peer_ev_clean else None
-    valuation_chart = _pgf_bar_chart(peer_labels, peer_ev_vals, "EV/EBITDA vs peers", "x")
+    valuation_chart = _pgf_bar_chart(peer_labels, peer_ev_vals, "EV/EBITDA Comparison", "Multiple (x)")
 
-    def short(text: Optional[str], fallback: str, max_chars: int = 450) -> str:
-        if not text:
-            return fallback
-        cleaned = text.strip().replace("\n", " ")
-        return cleaned[:max_chars] + ("..." if len(cleaned) > max_chars else "")
-
-    market_report = short(final_state.get("market_report"), "Market context summarized by agents unavailable.")
-    fundamentals_report = short(final_state.get("fundamentals_report"), "Fundamentals summary pending from agent.")
-    news_report = short(final_state.get("news_report"), "News and catalysts collected by agents.")
-    sentiment_report = short(final_state.get("sentiment_report"), "Sentiment sample not provided.")
-    pm_decision = short(final_state.get("final_trade_decision"), decision or "Hold")
+    # Content extraction - NO TRUNCATION
+    market_report = final_state.get("market_report") or "Market context summarized by agents unavailable."
+    fundamentals_report = final_state.get("fundamentals_report") or "Fundamentals summary pending from agent."
+    news_report = final_state.get("news_report") or "News and catalysts collected by agents."
+    sentiment_report = final_state.get("sentiment_report") or "Sentiment sample not provided."
+    pm_decision = final_state.get("final_trade_decision") or (decision or "Hold")
 
     thesis_points: List[str] = []
     investment_plan = final_state.get("investment_plan") or ""
     for line in investment_plan.split("\n"):
         if line.strip().startswith("-"):
             thesis_points.append(line.strip("- "))
-        if len(thesis_points) >= 5:
+        if len(thesis_points) >= 8: # Allow more points
             break
     if not thesis_points:
         thesis_points = [
@@ -439,7 +493,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
         ]
 
     risk_state = final_state.get("risk_debate_state", {}) or {}
-    risk_notes = short(risk_state.get("history"), "Risk committee notes not captured.")
+    risk_notes = risk_state.get("history") or "Risk committee notes not captured."
 
     def table_row(label: str, value: str) -> str:
         return rf"{_latex_escape(label)} & {_latex_escape(value)} \\ \hline"
@@ -468,7 +522,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     peer_median_display = f"{peer_median_multiple:.1f}" if peer_median_multiple is not None else "-"
 
     latex = f"""
-\\documentclass[12pt]{{article}}
+\\documentclass[11pt]{{article}}
 \\usepackage[margin=1in]{{geometry}}
 \\usepackage{{booktabs}}
 \\usepackage{{array}}
@@ -479,76 +533,123 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 \\usepackage{{float}}
 \\usepackage{{titlesec}}
 \\usepackage{{pgfplots}}
+\\usepackage{{parskip}} % Better paragraph spacing
 \\pgfplotsset{{compat=1.18}}
+
+% Custom section formatting
+\\titleformat{{\\section}}
+  {{\\normalfont\\Large\\bfseries\\color{{blue!40!black}}}}{{\\thesection}}{{1em}}{{}}
+\\titleformat{{\\subsection}}
+  {{\\normalfont\\large\\bfseries\\color{{gray!80!black}}}}{{\\thesubsection}}{{1em}}{{}}
+
 \\title{{{{ { _latex_escape(company_name) } ( { _latex_escape(ticker) } ) Investment Memo }}}}
 \\author{{{{TradingAgents Multi-LLM Desk}}}}
 \\date{{{{{_latex_escape(analysis_date)}}}}}
+
 \\begin{{document}}
 \\maketitle
 \\tableofcontents
 \\newpage
 
 \\section{{Executive Summary}}
-\\textbf{{Call:}} { _latex_escape(decision or 'Pending') }.\\\newline
-Expected return: {_fmt_pct(expected_return)} over ~{horizon_months} months; variant perception: {_latex_escape(variant_view)}.\\\newline
-Primary upside drivers: {_latex_escape(market_report[:160])}.\\\newline
-Primary downside drivers: {_latex_escape(risk_notes[:160])}.\\\newline
-Why mispriced: market is not pricing {_latex_escape(variant_view.lower())}; current EV/EBITDA {ev_ebitda_display} vs peer median {peer_median_display}.
+\\textbf{{Recommendation:}} { _latex_escape(decision or 'Pending') }.\\\\newline
+\\textbf{{Target Return:}} {_fmt_pct(expected_return)} over ~{horizon_months} months.\\\\newline
+\\textbf{{Variant Perception:}} {_latex_escape(variant_view)}.\\\\newline
+
+\\textbf{{Upside Drivers:}}
+\\begin{{itemize}}
+\\item {_latex_escape(market_report[:200])}...
+\\end{{itemize}}
+
+\\textbf{{Downside Risks:}}
+\\begin{{itemize}}
+\\item {_latex_escape(risk_notes[:200])}...
+\\end{{itemize}}
+
+\\textbf{{Valuation Check:}} Current EV/EBITDA is {ev_ebitda_display}x vs peer median {peer_median_display}x.
 
 \\section{{Company Overview}}
-{ _latex_escape(fundamentals_report) }\\\newline
-Business segments & revenue mix: consolidated view; latest quarterly revenue {_fmt_curr(financials.revenue_series[-1][1] if financials.revenue_series else None)}.\\\newline
-Geographic exposure: {_latex_escape(country or 'global markets')}.\\\newline
-Recent strategic developments: {_latex_escape(news_report)}.
+\\textbf{{Business Description:}} { _latex_escape(fundamentals_report) }
+
+\\textbf{{Key Stats:}}
+\\begin{{itemize}}
+\\item Latest Quarterly Revenue: {_fmt_curr(financials.revenue_series[-1][1] if financials.revenue_series else None)}
+\\item Geographic Exposure: {_latex_escape(country or 'global markets')}
+\\item Industry: {_latex_escape(industry)}
+\\end{{itemize}}
+
+\\subsection{{Recent Developments}}
+{_latex_escape(news_report)}
 
 \\section{{Industry and Competitive Landscape}}
-Core drivers: {_latex_escape(market_report)}.\\\newline
-Competitive positioning: {_latex_escape(sentiment_report)}.\\\newline
-Structural tailwinds/headwinds: {_latex_escape(news_report[:220])}.
+\\textbf{{Market Drivers:}}
+{_latex_escape(market_report)}
 
-\\section{{Catalysts (Upcoming and Medium-Term)}}
-Hard catalysts: earnings cadence, product updates, regulatory checkpoints.\\\newline
-Soft catalysts: capital allocation shifts, leadership signals, sentiment reversals.\\\newline
-Expected timeline: next {horizon_months} months with market reaction tied to delivery vs guide.
+\\textbf{{Competitive Positioning:}}
+{_latex_escape(sentiment_report)}
 
-\\section{{Financial Model Summary}}
-\\textbf{{Revenue drivers}}: recent run-rate {_fmt_curr(financials.revenue_series[-1][1] if financials.revenue_series else None)}; growth {_fmt_pct(valuation.growth)}.\\\newline
-\\textbf{{Margins}}: EBITDA margin trend below.\\\newline
-\\textbf{{Cash generation}}: FCF {_fmt_curr(financials.fcf_series[-1][1] if financials.fcf_series else None)}; net debt {_fmt_curr(financials.net_debt)}; shares {_fmt_curr(financials.shares_outstanding)}.\\\newline
-Sensitivity: scenario table below captures valuation delta to key drivers.
+\\section{{Catalysts}}
+\\textbf{{Upcoming Events:}}
+\\begin{{itemize}}
+\\item Earnings cadence and guidance updates
+\\item Product launches or regulatory decisions
+\\item Macroeconomic shifts affecting the { _latex_escape(sector) } sector
+\\end{{itemize}}
+
+\\section{{Financial Analysis}}
+\\textbf{{Revenue & Growth:}}
+Recent run-rate revenue is {_fmt_curr(financials.revenue_series[-1][1] if financials.revenue_series else None)} with estimated growth of {_fmt_pct(valuation.growth)}.
+
+\\textbf{{Profitability:}}
+EBITDA margin trend is visualized below.
+
+\\textbf{{Balance Sheet & Cash Flow:}}
+\\begin{{itemize}}
+\\item FCF: {_fmt_curr(financials.fcf_series[-1][1] if financials.fcf_series else None)}
+\\item Net Debt: {_fmt_curr(financials.net_debt)}
+\\item Shares Outstanding: {_fmt_curr(financials.shares_outstanding)}
+\\end{{itemize}}
 
 \\begin{{figure}}[H]
 \\centering
 {price_chart}
-\\caption{{Price trend and momentum}}
+\\caption{{Price Action (Last 90 Days)}}
 \\end{{figure}}
 
 \\begin{{figure}}[H]
 \\centering
 {revenue_chart}
-\\caption{{Revenue trajectory}}
+\\caption{{Quarterly Revenue Trend}}
 \\end{{figure}}
 
 \\begin{{figure}}[H]
 \\centering
 {margin_chart}
-\\caption{{EBITDA margin trend}}
+\\caption{{EBITDA Margin Trajectory}}
 \\end{{figure}}
 
 \\section{{Valuation}}
-Current price {_fmt_curr(valuation.price)}; market cap {_fmt_curr(valuation.market_cap)}; EV {_fmt_curr(valuation.enterprise_value)}.\\\newline
-Multiples: P/E {_fmt_pct(valuation.pe)}; EV/EBITDA {ev_ebitda_display}; FCF yield {_fmt_pct(valuation.fcf_yield)}.\\\newline
-Historical vs present: peer-adjusted comparison below.
+\\textbf{{Current Metrics:}}
+\\begin{{itemize}}
+\\item Price: {_fmt_curr(valuation.price)}
+\\item Market Cap: {_fmt_curr(valuation.market_cap)}
+\\item Enterprise Value: {_fmt_curr(valuation.enterprise_value)}
+\\item P/E Ratio: {_fmt_pct(valuation.pe)}
+\\item EV/EBITDA: {ev_ebitda_display}x
+\\item FCF Yield: {_fmt_pct(valuation.fcf_yield)}
+\\end{{itemize}}
 
 \\begin{{figure}}[H]
 \\centering
 {valuation_chart}
-\\caption{{EV/EBITDA vs peer set}}
+\\caption{{Relative Valuation (EV/EBITDA)}}
 \\end{{figure}}
 
+\\subsection{{Scenario Analysis}}
 \\begin{{longtable}}{{p{{0.45\\linewidth}}p{{0.45\\linewidth}}}}
 \\toprule
-Scenario & Outcome \\\n+\\midrule
+\\textbf{{Scenario}} & \\textbf{{Outcome}} \\\\
+\\midrule
 {scenario_rows}
 \\bottomrule
 \\end{{longtable}}
@@ -559,23 +660,25 @@ Scenario & Outcome \\\n+\\midrule
 \\end{{itemize}}
 
 \\section{{Variant View}}
-How we differ: {_latex_escape(variant_view)}; Street likely missing throughput on margins and durability of growth vs { _latex_escape(sector) }.\\\newline
-Quantified spread vs consensus: probability-weighted return {_fmt_pct(pw_return)} relative to spot.
+\\textbf{{Our Edge:}} {_latex_escape(variant_view)}.
+The market may be underestimating the durability of growth or the impact of recent efficiency measures compared to the { _latex_escape(sector) } sector average.
 
 \\section{{Risks and Disconfirming Evidence}}
-Key bear points: {_latex_escape(risk_notes)}.\\\newline
-Early warnings: margin compression, revenue deceleration, tightening liquidity.\\\newline
-Exit triggers: thesis break if bear case metrics persist or catalysts fail.
+\\textbf{{Key Risks:}}
+{_latex_escape(risk_notes)}
 
 \\section{{Appendix}}
-\\textbf{{Peers and comps}}\\\newline
+\\subsection{{Peer Comparison}}
+\\begin{{tabular}}{{lrrr}}
+\\toprule
+\\textbf{{Company}} & \\textbf{{P/E}} & \\textbf{{EV/EBITDA}} & \\textbf{{FCF Yield}} \\\\
+\\midrule
 {peer_table}
+\\bottomrule
+\\end{{tabular}}
 
-\\textbf{{Channel checks & filings}}\\\newline
-{_latex_escape(news_report)}
-
-\\textbf{{Agent trace}}\\\newline
-Portfolio decision: {_latex_escape(pm_decision)}.
+\\subsection{{Agent Trace}}
+\\textbf{{Final Decision:}} {_latex_escape(pm_decision)}
 
 \\end{{document}}
 """
@@ -614,26 +717,21 @@ def build_markdown_report(final_state: dict, selections: dict, decision: Optiona
     pw_return = (prob_weighted / valuation.price - 1) if valuation.price else expected_return
     ev_ebitda_display = f"{valuation.ev_ebitda:.1f}" if valuation.ev_ebitda is not None else "-"
 
-    def short(text: Optional[str], fallback: str, max_chars: int = 450) -> str:
-        if not text:
-            return fallback
-        cleaned = str(text).strip().replace("\n", " ")
-        return cleaned[:max_chars] + ("..." if len(cleaned) > max_chars else "")
-
-    market_report = short(final_state.get("market_report"), "Market context summarized by agents unavailable.")
-    fundamentals_report = short(final_state.get("fundamentals_report"), "Fundamentals summary pending from agent.")
-    news_report = short(final_state.get("news_report"), "News and catalysts collected by agents.")
-    sentiment_report = short(final_state.get("sentiment_report"), "Sentiment sample not provided.")
-    pm_decision = short(final_state.get("final_trade_decision"), decision or "Hold")
+    # Content extraction - NO TRUNCATION
+    market_report = final_state.get("market_report") or "Market context summarized by agents unavailable."
+    fundamentals_report = final_state.get("fundamentals_report") or "Fundamentals summary pending from agent."
+    news_report = final_state.get("news_report") or "News and catalysts collected by agents."
+    sentiment_report = final_state.get("sentiment_report") or "Sentiment sample not provided."
+    pm_decision = final_state.get("final_trade_decision") or (decision or "Hold")
     risk_state = final_state.get("risk_debate_state", {}) or {}
-    risk_notes = short(risk_state.get("history"), "Risk committee notes not captured.")
+    risk_notes = risk_state.get("history") or "Risk committee notes not captured."
 
     thesis_points: List[str] = []
     investment_plan = final_state.get("investment_plan") or ""
     for line in investment_plan.split("\n"):
         if line.strip().startswith("-"):
             thesis_points.append(line.strip("- "))
-        if len(thesis_points) >= 5:
+        if len(thesis_points) >= 8:
             break
     if not thesis_points:
         thesis_points = [
@@ -659,7 +757,8 @@ def build_markdown_report(final_state: dict, selections: dict, decision: Optiona
     lines.append(f"- 3m return: {_fmt_pct(price.three_month_return)}")
     lines.append(f"- 1y return: {_fmt_pct(price.one_year_return)}")
     lines.append(f"- Volatility (ann.): {_fmt_pct(price.volatility)}")
-    lines.append(f"- Beta vs SPY: {price.beta:.2f if price.beta is not None else '-'}")
+    beta_display = f"{price.beta:.2f}" if price.beta is not None else "-"
+    lines.append(f"- Beta vs SPY: {beta_display}")
     lines.append("")
 
     lines.append("## Fundamentals Snapshot")
@@ -696,11 +795,11 @@ def build_markdown_report(final_state: dict, selections: dict, decision: Optiona
         lines.append("")
 
     lines.append("## Qualitative Takeaways")
-    lines.append(f"- Market context: {market_report}")
-    lines.append(f"- Fundamentals: {fundamentals_report}")
-    lines.append(f"- News & catalysts: {news_report}")
-    lines.append(f"- Sentiment: {sentiment_report}")
-    lines.append(f"- Risks: {risk_notes}")
+    lines.append(f"### Market Context\n{market_report}\n")
+    lines.append(f"### Fundamentals\n{fundamentals_report}\n")
+    lines.append(f"### News & Catalysts\n{news_report}\n")
+    lines.append(f"### Sentiment\n{sentiment_report}\n")
+    lines.append(f"### Risks\n{risk_notes}\n")
     lines.append("")
 
     lines.append("## Thesis Bullets")

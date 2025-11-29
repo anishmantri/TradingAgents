@@ -12,10 +12,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 import re
+import time
+import logging
+import concurrent.futures
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------- Data Containers ---------------------------
@@ -77,6 +82,34 @@ class ScenarioCase:
     price: float
     return_pct: float
     probability: float
+    reasoning: str
+
+
+def _clean_agent_text(text: str) -> str:
+    """Cleans up agent output to remove role labels and artifacts."""
+    if not text:
+        return ""
+    
+    # Remove role labels like "Risky Analyst:", "Market Analyst:", etc.
+    # Added \s* to handle leading whitespace
+    text = re.sub(r'^\s*(Market|Social|News|Fundamentals|Risky|Neutral|Safe) Analyst:', '', text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r'^\s*(Bull|Bear) Researcher:', '', text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r'^\s*Research Manager:', '', text, flags=re.MULTILINE | re.IGNORECASE)
+    text = re.sub(r'^\s*Portfolio Manager:', '', text, flags=re.MULTILINE | re.IGNORECASE)
+    
+    # Remove "Sub-agent" mentions
+    text = re.sub(r'Sub-agent', 'Analyst', text, flags=re.IGNORECASE)
+    
+    # Remove "Price()" artifact if present
+    text = re.sub(r'Price\(\)', 'Price', text, flags=re.IGNORECASE)
+    
+    # Remove "newline" artifacts
+    text = re.sub(r'\bnewline\b', ' ', text, flags=re.IGNORECASE)
+    
+    # Remove "Here is the report:" type intros
+    text = re.sub(r'^\s*Here is the (report|analysis|summary).*?:', '', text, flags=re.MULTILINE | re.IGNORECASE)
+    
+    return text.strip()
 
 
 # --------------------------- Helpers ---------------------------
@@ -203,9 +236,71 @@ def _latex_format_text(text: str) -> str:
     lines = text.split("\n")
     formatted_lines = []
     in_list = False
+    in_code_block = False
+    in_table = False
+    table_rows = []
     
     for line in lines:
         stripped = line.strip()
+        
+        # Code Blocks
+        if stripped.startswith("```"):
+            if in_code_block:
+                formatted_lines.append(r"\end{verbatim}")
+                in_code_block = False
+            else:
+                if in_list:
+                    formatted_lines.append(r"\end{itemize}")
+                    in_list = False
+                formatted_lines.append(r"\begin{verbatim}")
+                in_code_block = True
+            continue
+            
+        if in_code_block:
+            formatted_lines.append(line)
+            continue
+
+        # Tables (basic support)
+        if "|" in line and (line.strip().startswith("|") or line.strip().endswith("|")):
+            if not in_table:
+                in_table = True
+                table_rows = []
+            
+            # Skip separator lines like |---|---|
+            if set(line.strip()) <= {"|", "-", " ", ":"}:
+                continue
+                
+            # Parse row
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            table_rows.append(cells)
+            continue
+        elif in_table:
+            # End of table
+            in_table = False
+            if table_rows:
+                num_cols = len(table_rows[0])
+                col_spec = "l" * num_cols
+                formatted_lines.append(r"\begin{tabular}{" + col_spec + "}")
+                formatted_lines.append(r"\toprule")
+                
+                # Header
+                header_cells = [_process_formatting(c) for c in table_rows[0]]
+                formatted_lines.append(" & ".join(rf"\textbf{{{c}}}" for c in header_cells) + r" \\")
+                formatted_lines.append(r"\midrule")
+                
+                # Body
+                for row in table_rows[1:]:
+                    # Ensure row has same number of columns
+                    if len(row) != num_cols:
+                        continue
+                    row_cells = [_process_formatting(c) for c in row]
+                    formatted_lines.append(" & ".join(row_cells) + r" \\")
+                    
+                formatted_lines.append(r"\bottomrule")
+                formatted_lines.append(r"\end{tabular}")
+                formatted_lines.append(r"\par\vspace{0.5em}")
+            table_rows = []
+
         if not stripped:
             if in_list:
                 formatted_lines.append(r"\end{itemize}")
@@ -237,35 +332,52 @@ def _latex_format_text(text: str) -> str:
                 formatted_lines.append(r"\begin{itemize}")
                 in_list = True
             
-            # Handle bolding within list items
-            content = _process_bold(content)
+            content = _process_formatting(content)
             formatted_lines.append(rf"\item {content}")
         else:
             if in_list:
                 formatted_lines.append(r"\end{itemize}")
                 in_list = False
             
-            # Handle bolding within regular text
-            content = _process_bold(stripped)
+            content = _process_formatting(stripped)
             formatted_lines.append(content + r" \\")
             
     if in_list:
         formatted_lines.append(r"\end{itemize}")
+    if in_code_block:
+        formatted_lines.append(r"\end{verbatim}")
+    if in_table and table_rows:
+        # Flush remaining table if file ended
+        num_cols = len(table_rows[0])
+        col_spec = "l" * num_cols
+        formatted_lines.append(r"\begin{tabular}{" + col_spec + "}")
+        formatted_lines.append(r"\toprule")
+        header_cells = [_process_formatting(c) for c in table_rows[0]]
+        formatted_lines.append(" & ".join(rf"\textbf{{{c}}}" for c in header_cells) + r" \\")
+        formatted_lines.append(r"\midrule")
+        for row in table_rows[1:]:
+             if len(row) == num_cols:
+                row_cells = [_process_formatting(c) for c in row]
+                formatted_lines.append(" & ".join(row_cells) + r" \\")
+        formatted_lines.append(r"\bottomrule")
+        formatted_lines.append(r"\end{tabular}")
         
     return "\n".join(formatted_lines)
 
 
-def _process_bold(text: str) -> str:
-    """Helper to handle **bold** text."""
-    # Split by ** to find bold parts
-    parts = text.split("**")
-    processed = []
-    for i, part in enumerate(parts):
-        if i % 2 == 1: # Odd parts are between ** **
-            processed.append(rf"\textbf{{{_latex_escape(part)}}}")
-        else:
-            processed.append(_latex_escape(part))
-    return "".join(processed)
+def _process_formatting(text: str) -> str:
+    """Helper to handle **bold** and *italic* text."""
+    # Escape special characters first
+    escaped = _latex_escape(text)
+    
+    # Bold: **text** -> \textbf{text}
+    escaped = re.sub(r'\*\*(.*?)\*\*', r"\\textbf{\1}", escaped)
+    
+    # Italic: *text* -> \textit{text}
+    # Use negative lookbehind/lookahead to avoid matching ** as *
+    escaped = re.sub(r'(?<!\*)\*(?!\*)(.*?)(?<!\*)\*(?!\*)', r"\\textit{\1}", escaped)
+    
+    return escaped
 
 
 def _pgf_time_series(
@@ -355,145 +467,160 @@ def _pgf_bar_chart(labels: Sequence[str], values: Sequence[float], title: str, y
 
 
 def load_price_snapshot(ticker: str, analysis_date: str, lookback_days: int) -> PriceSnapshot:
-    end_dt = pd.to_datetime(analysis_date)
-    start_dt = end_dt - timedelta(days=max(lookback_days, 365))
-    price_df = yf.download(ticker, start=start_dt, end=end_dt + timedelta(days=1), progress=False)
-    if price_df.empty:
+    start_time = time.time()
+    logger.info(f"Loading price snapshot for {ticker}...")
+    try:
+        end_dt = pd.to_datetime(analysis_date)
+        start_dt = end_dt - timedelta(days=max(lookback_days, 365))
+        price_df = yf.download(ticker, start=start_dt, end=end_dt + timedelta(days=1), progress=False)
+        if price_df.empty:
+            return PriceSnapshot([], [], None, None, None, None, None, None, None)
+
+        if isinstance(price_df.columns, pd.MultiIndex):
+            price_df.columns = price_df.columns.get_level_values(0)
+
+        price_df = price_df.sort_index()
+        close_candidates = ["Adj Close", "Close", "adjclose", "adj_close", "close"]
+        close_col = next((c for c in close_candidates if c in price_df.columns), None)
+        if not close_col:
+            return PriceSnapshot([], [], None, None, None, None, None, None, None)
+
+        price_df = price_df.dropna(subset=[close_col])
+        closes = price_df[close_col]
+        dates = [idx.strftime("%Y-%m-%d") for idx in closes.index]
+
+        ret_1y = None
+        ret_3m = None
+        if len(closes) > 60:
+            ret_3m = float(closes.iloc[-1] / closes.iloc[-63] - 1)
+        if len(closes) > 250:
+            ret_1y = float(closes.iloc[-1] / closes.iloc[-252] - 1)
+
+        returns = closes.pct_change().dropna()
+        vol = float(returns.std() * np.sqrt(252)) if not returns.empty else None
+
+        spy_df = yf.download("SPY", start=start_dt, end=end_dt + timedelta(days=1), progress=False)
+        beta = None
+        if not spy_df.empty:
+            if isinstance(spy_df.columns, pd.MultiIndex):
+                spy_df.columns = spy_df.columns.get_level_values(0)
+            spy_close_col = next((c for c in close_candidates if c in spy_df.columns), None)
+            if spy_close_col:
+                spy_ret = spy_df[spy_close_col].pct_change().dropna()
+                beta = _compute_beta(returns, spy_ret)
+
+        # Technical Indicators
+        # RSI (14)
+        delta = closes.diff()
+        gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+        rs = gain / loss
+        rsi_series = 100 - (100 / (1 + rs))
+        rsi = rsi_series.fillna(50).tolist() # Fill NaN with 50 (neutral)
+
+        # MACD (12, 26, 9)
+        exp1 = closes.ewm(span=12, adjust=False).mean()
+        exp2 = closes.ewm(span=26, adjust=False).mean()
+        macd_series = exp1 - exp2
+        signal_series = macd_series.ewm(span=9, adjust=False).mean()
+        
+        macd = macd_series.fillna(0).tolist()
+        macd_signal = signal_series.fillna(0).tolist()
+
+        logger.info(f"Loaded price snapshot for {ticker} in {time.time() - start_time:.2f}s")
+        return PriceSnapshot(
+            dates=dates, 
+            closes=list(closes.values), 
+            one_year_return=ret_1y, 
+            three_month_return=ret_3m, 
+            volatility=vol, 
+            beta=beta,
+            rsi=rsi,
+            macd=macd,
+            macd_signal=macd_signal
+        )
+    except Exception as e:
+        logger.error(f"Error loading price snapshot for {ticker}: {e}")
         return PriceSnapshot([], [], None, None, None, None, None, None, None)
-
-    if isinstance(price_df.columns, pd.MultiIndex):
-        price_df.columns = price_df.columns.get_level_values(0)
-
-    price_df = price_df.sort_index()
-    close_candidates = ["Adj Close", "Close", "adjclose", "adj_close", "close"]
-    close_col = next((c for c in close_candidates if c in price_df.columns), None)
-    if not close_col:
-        return PriceSnapshot([], [], None, None, None, None, None, None, None)
-
-    price_df = price_df.dropna(subset=[close_col])
-    closes = price_df[close_col]
-    dates = [idx.strftime("%Y-%m-%d") for idx in closes.index]
-
-    ret_1y = None
-    ret_3m = None
-    if len(closes) > 60:
-        ret_3m = float(closes.iloc[-1] / closes.iloc[-63] - 1)
-    if len(closes) > 250:
-        ret_1y = float(closes.iloc[-1] / closes.iloc[-252] - 1)
-
-    returns = closes.pct_change().dropna()
-    vol = float(returns.std() * np.sqrt(252)) if not returns.empty else None
-
-    spy_df = yf.download("SPY", start=start_dt, end=end_dt + timedelta(days=1), progress=False)
-    beta = None
-    if not spy_df.empty:
-        if isinstance(spy_df.columns, pd.MultiIndex):
-            spy_df.columns = spy_df.columns.get_level_values(0)
-        spy_close_col = next((c for c in close_candidates if c in spy_df.columns), None)
-        if spy_close_col:
-            spy_ret = spy_df[spy_close_col].pct_change().dropna()
-            beta = _compute_beta(returns, spy_ret)
-
-    # Technical Indicators
-    # RSI (14)
-    delta = closes.diff()
-    gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-    loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
-    rs = gain / loss
-    rsi_series = 100 - (100 / (1 + rs))
-    rsi = rsi_series.fillna(50).tolist() # Fill NaN with 50 (neutral)
-
-    # MACD (12, 26, 9)
-    exp1 = closes.ewm(span=12, adjust=False).mean()
-    exp2 = closes.ewm(span=26, adjust=False).mean()
-    macd_series = exp1 - exp2
-    signal_series = macd_series.ewm(span=9, adjust=False).mean()
-    
-    macd = macd_series.fillna(0).tolist()
-    macd_signal = signal_series.fillna(0).tolist()
-
-    return PriceSnapshot(
-        dates=dates, 
-        closes=list(closes.values), 
-        one_year_return=ret_1y, 
-        three_month_return=ret_3m, 
-        volatility=vol, 
-        beta=beta,
-        rsi=rsi,
-        macd=macd,
-        macd_signal=macd_signal
-    )
 
 
 def load_financial_snapshot(ticker: str) -> FinancialSnapshot:
-    tkr = yf.Ticker(ticker)
-    q_fin = getattr(tkr, "quarterly_financials", pd.DataFrame())
-    fin = getattr(tkr, "financials", pd.DataFrame())
-    bs = getattr(tkr, "balance_sheet", pd.DataFrame())
-    cf = getattr(tkr, "cashflow", pd.DataFrame())
-    info = getattr(tkr, "info", {}) or {}
+    start_time = time.time()
+    logger.info(f"Loading financial snapshot for {ticker}...")
+    try:
+        tkr = yf.Ticker(ticker)
+        q_fin = getattr(tkr, "quarterly_financials", pd.DataFrame())
+        fin = getattr(tkr, "financials", pd.DataFrame())
+        bs = getattr(tkr, "balance_sheet", pd.DataFrame())
+        cf = getattr(tkr, "cashflow", pd.DataFrame())
+        info = getattr(tkr, "info", {}) or {}
 
-    revenue_series = _clean_series(q_fin.loc["Total Revenue"]) if "Total Revenue" in q_fin.index else _clean_series(fin.loc["Total Revenue"]) if "Total Revenue" in fin.index else []
-    ebitda_series = _clean_series(fin.loc["Ebitda"]) if "Ebitda" in fin.index else []
-    margin_series: List[Tuple[str, float]] = []
-    if revenue_series and ebitda_series:
-        rev_dict = dict(revenue_series)
-        for period, ebitda in ebitda_series:
-            rev = rev_dict.get(period)
-            if rev:
-                margin_series.append((period, ebitda / rev))
-    fcf_series: List[Tuple[str, float]] = []
-    if "Total Cash From Operating Activities" in cf.index and "Capital Expenditures" in cf.index:
-        ocf = _clean_series(cf.loc["Total Cash From Operating Activities"])
-        capex = _clean_series(cf.loc["Capital Expenditures"])
-        ocf_dict = dict(ocf)
-        for period, cap in capex:
-            if period in ocf_dict:
-                fcf_series.append((period, ocf_dict[period] + cap))
+        revenue_series = _clean_series(q_fin.loc["Total Revenue"]) if "Total Revenue" in q_fin.index else _clean_series(fin.loc["Total Revenue"]) if "Total Revenue" in fin.index else []
+        ebitda_series = _clean_series(fin.loc["Ebitda"]) if "Ebitda" in fin.index else []
+        margin_series: List[Tuple[str, float]] = []
+        if revenue_series and ebitda_series:
+            rev_dict = dict(revenue_series)
+            for period, ebitda in ebitda_series:
+                rev = rev_dict.get(period)
+                if rev:
+                    margin_series.append((period, ebitda / rev))
+        fcf_series: List[Tuple[str, float]] = []
+        if "Total Cash From Operating Activities" in cf.index and "Capital Expenditures" in cf.index:
+            ocf = _clean_series(cf.loc["Total Cash From Operating Activities"])
+            capex = _clean_series(cf.loc["Capital Expenditures"])
+            ocf_dict = dict(ocf)
+            for period, cap in capex:
+                if period in ocf_dict:
+                    fcf_series.append((period, ocf_dict[period] + cap))
 
-    net_debt = None
-    if "Total Debt" in bs.index and "Cash" in bs.index:
-        debt_series = _clean_series(bs.loc["Total Debt"])
-        cash_series = _clean_series(bs.loc["Cash"])
-        if debt_series and cash_series:
-            net_debt = debt_series[-1][1] - cash_series[-1][1]
+        net_debt = None
+        if "Total Debt" in bs.index and "Cash" in bs.index:
+            debt_series = _clean_series(bs.loc["Total Debt"])
+            cash_series = _clean_series(bs.loc["Cash"])
+            if debt_series and cash_series:
+                net_debt = debt_series[-1][1] - cash_series[-1][1]
 
-    shares = _safe_float(info.get("sharesOutstanding"))
-    
-    # Extract latest values for table
-    latest_rev = revenue_series[-1][1] if revenue_series else _safe_float(info.get("totalRevenue"))
-    latest_ebitda = ebitda_series[-1][1] if ebitda_series else _safe_float(info.get("ebitda"))
-    latest_ni = _safe_float(info.get("netIncomeToCommon"))
-    
-    gross_margin = _safe_float(info.get("grossMargins"))
-    op_margin = _safe_float(info.get("operatingMargins"))
-    net_margin = _safe_float(info.get("profitMargins"))
-    
-    total_cash = _safe_float(info.get("totalCash"))
-    total_debt = _safe_float(info.get("totalDebt"))
-    total_assets = _clean_series(bs.loc["Total Assets"])[-1][1] if "Total Assets" in bs.index else None
-    total_liab = _clean_series(bs.loc["Total Liabilities Net Minority Interest"])[-1][1] if "Total Liabilities Net Minority Interest" in bs.index else None
-    equity = _clean_series(bs.loc["Stockholders Equity"])[-1][1] if "Stockholders Equity" in bs.index else None
+        shares = _safe_float(info.get("sharesOutstanding"))
+        
+        # Extract latest values for table
+        latest_rev = revenue_series[-1][1] if revenue_series else _safe_float(info.get("totalRevenue"))
+        latest_ebitda = ebitda_series[-1][1] if ebitda_series else _safe_float(info.get("ebitda"))
+        latest_ni = _safe_float(info.get("netIncomeToCommon"))
+        
+        gross_margin = _safe_float(info.get("grossMargins"))
+        op_margin = _safe_float(info.get("operatingMargins"))
+        net_margin = _safe_float(info.get("profitMargins"))
+        
+        total_cash = _safe_float(info.get("totalCash"))
+        total_debt = _safe_float(info.get("totalDebt"))
+        total_assets = _clean_series(bs.loc["Total Assets"])[-1][1] if "Total Assets" in bs.index else None
+        total_liab = _clean_series(bs.loc["Total Liabilities Net Minority Interest"])[-1][1] if "Total Liabilities Net Minority Interest" in bs.index else None
+        equity = _clean_series(bs.loc["Stockholders Equity"])[-1][1] if "Stockholders Equity" in bs.index else None
 
-    return FinancialSnapshot(
-        revenue_series=revenue_series,
-        ebitda_series=ebitda_series,
-        margin_series=margin_series,
-        fcf_series=fcf_series,
-        net_debt=net_debt,
-        shares_outstanding=shares,
-        latest_revenue=latest_rev,
-        latest_ebitda=latest_ebitda,
-        latest_net_income=latest_ni,
-        gross_margin=gross_margin,
-        operating_margin=op_margin,
-        net_margin=net_margin,
-        total_cash=total_cash,
-        total_debt=total_debt,
-        total_assets=total_assets,
-        total_liabilities=total_liab,
-        equity=equity
-    )
+        logger.info(f"Loaded financial snapshot for {ticker} in {time.time() - start_time:.2f}s")
+        return FinancialSnapshot(
+            revenue_series=revenue_series,
+            ebitda_series=ebitda_series,
+            margin_series=margin_series,
+            fcf_series=fcf_series,
+            net_debt=net_debt,
+            shares_outstanding=shares,
+            latest_revenue=latest_rev,
+            latest_ebitda=latest_ebitda,
+            latest_net_income=latest_ni,
+            gross_margin=gross_margin,
+            operating_margin=op_margin,
+            net_margin=net_margin,
+            total_cash=total_cash,
+            total_debt=total_debt,
+            total_assets=total_assets,
+            total_liabilities=total_liab,
+            equity=equity
+        )
+    except Exception as e:
+        logger.error(f"Error loading financial snapshot for {ticker}: {e}")
+        # Return empty snapshot on error
+        return FinancialSnapshot([], [], [], [], None, None, None, None, None, None, None, None, None, None, None, None, None)
 
 
 def load_valuation_snapshot(ticker: str, financials: FinancialSnapshot) -> ValuationSnapshot:
@@ -558,14 +685,29 @@ def peer_list(sector: str, ticker: str) -> List[str]:
 
 
 def load_peers_metrics(ticker: str, sector: str, financials: FinancialSnapshot) -> Dict[str, ValuationSnapshot]:
+    start_time = time.time()
     peers = peer_list(sector, ticker)
+    logger.info(f"Loading metrics for {len(peers)} peers: {peers}...")
+    
     metrics: Dict[str, ValuationSnapshot] = {}
-    for peer in peers:
+    
+    def fetch_peer(peer_ticker: str) -> Optional[Tuple[str, ValuationSnapshot]]:
         try:
-            peer_fin = load_financial_snapshot(peer)
-            metrics[peer] = load_valuation_snapshot(peer, peer_fin)
-        except Exception:
-            continue
+            peer_fin = load_financial_snapshot(peer_ticker)
+            val = load_valuation_snapshot(peer_ticker, peer_fin)
+            return peer_ticker, val
+        except Exception as e:
+            logger.warning(f"Failed to load peer {peer_ticker}: {e}")
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_peer = {executor.submit(fetch_peer, p): p for p in peers}
+        for future in concurrent.futures.as_completed(future_to_peer):
+            result = future.result()
+            if result:
+                metrics[result[0]] = result[1]
+                
+    logger.info(f"Loaded peer metrics in {time.time() - start_time:.2f}s")
     return metrics
 
 
@@ -580,6 +722,7 @@ def build_scenarios(
     ebitda = financials.latest_ebitda
     peer_ev_ebitda_values = [m.ev_ebitda for m in peers.values() if m.ev_ebitda]
     peer_multiple = np.median(peer_ev_ebitda_values) if peer_ev_ebitda_values else valuation.ev_ebitda or 10.0
+    current_multiple = valuation.ev_ebitda or peer_multiple
 
     def implied_price(multiplier: float) -> Optional[float]:
         if not ebitda or not financials.shares_outstanding:
@@ -588,14 +731,25 @@ def build_scenarios(
         ev = ebitda * multiplier + net_debt
         return ev / financials.shares_outstanding
 
-    base_price = implied_price(peer_multiple) or last_price * (1 + expected_return)
-    bull_price = implied_price(peer_multiple * 1.2) or last_price * (1 + expected_return + 0.1)
-    bear_price = implied_price(max(peer_multiple * 0.8, peer_multiple - 2)) or last_price * (1 + expected_return - 0.15)
+    # Base Case: Converge to peer median or maintain current trajectory
+    base_multiple = (current_multiple + peer_multiple) / 2
+    base_price = implied_price(base_multiple) or last_price * (1 + expected_return)
+    base_reasoning = f"Valuation converges toward peer median of {peer_multiple:.1f}x EV/EBITDA."
+
+    # Bull Case: Multiple expansion + growth premium
+    bull_multiple = max(peer_multiple * 1.2, current_multiple * 1.15)
+    bull_price = implied_price(bull_multiple) or last_price * (1 + expected_return + 0.15)
+    bull_reasoning = "Multiple expansion driven by growth acceleration and margin improvement."
+
+    # Bear Case: Multiple compression or execution miss
+    bear_multiple = min(peer_multiple * 0.8, current_multiple * 0.85)
+    bear_price = implied_price(bear_multiple) or last_price * (1 + expected_return - 0.20)
+    bear_reasoning = "Multiple compression due to macro headwinds or execution risks."
 
     cases = [
-        ScenarioCase("Bull", float(bull_price), float(bull_price / last_price - 1) if last_price else 0.0, 0.25),
-        ScenarioCase("Base", float(base_price), float(base_price / last_price - 1) if last_price else expected_return, 0.5),
-        ScenarioCase("Bear", float(bear_price), float(bear_price / last_price - 1) if last_price else -0.2, 0.25),
+        ScenarioCase("Bull", float(bull_price), float(bull_price / last_price - 1) if last_price else 0.0, 0.25, bull_reasoning),
+        ScenarioCase("Base", float(base_price), float(base_price / last_price - 1) if last_price else expected_return, 0.50, base_reasoning),
+        ScenarioCase("Bear", float(bear_price), float(bear_price / last_price - 1) if last_price else -0.2, 0.25, bear_reasoning),
     ]
     return cases
 
@@ -654,6 +808,9 @@ def _render_valuation_table(val: ValuationSnapshot) -> str:
 
 
 def build_latex_report(final_state: dict, selections: dict, decision: Optional[str], report_dir: Path) -> str:
+    total_start = time.time()
+    logger.info("Starting LaTeX report generation...")
+    
     ticker = selections["ticker"]
     analysis_date = selections["analysis_date"]
     lookback = selections.get("lookback_days", 180)
@@ -693,31 +850,44 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     peer_ev_vals = [p.ev_ebitda or 0 for p in peers.values()] + [valuation.ev_ebitda or 0]
     valuation_chart = _pgf_bar_chart(peer_labels, peer_ev_vals, "EV/EBITDA Comparison", "Multiple (x)")
 
-    # Technical Charts
+    # Technical Charts - Modular inclusion
     rsi_chart = ""
     macd_chart = ""
+    include_ta = False
     
+    # Simple heuristic: include TA if RSI is overbought/oversold or MACD is divergent
     if price.rsi:
-        rsi_data = list(zip(price.dates, price.rsi))[-90:]
-        rsi_chart = _pgf_time_series(rsi_data, "RSI (14)", "RSI")
+        last_rsi = price.rsi[-1]
+        if last_rsi > 65 or last_rsi < 35:
+            include_ta = True
+            rsi_data = list(zip(price.dates, price.rsi))[-90:]
+            rsi_chart = _pgf_time_series(rsi_data, "RSI (14)", "RSI")
         
     if price.macd and price.macd_signal:
-        macd_data = list(zip(price.dates, price.macd))[-90:]
-        signal_data = list(zip(price.dates, price.macd_signal))[-90:]
-        macd_chart = _pgf_time_series(
-            macd_data, 
-            "MACD (12, 26, 9)", 
-            "Value", 
-            extra_coords=signal_data,
-            legend_labels=["MACD", "Signal"]
-        )
+        if abs(price.macd[-1] - price.macd_signal[-1]) > 0.5: # Arbitrary threshold for "meaningful"
+            include_ta = True
+            macd_data = list(zip(price.dates, price.macd))[-90:]
+            signal_data = list(zip(price.dates, price.macd_signal))[-90:]
+            macd_chart = _pgf_time_series(
+                macd_data, 
+                "MACD (12, 26, 9)", 
+                "Value", 
+                extra_coords=signal_data,
+                legend_labels=["MACD", "Signal"]
+            )
 
-    # Content extraction
-    market_report = final_state.get("market_report") or "Market context summarized by agents unavailable."
-    fundamentals_report = final_state.get("fundamentals_report") or "Fundamentals summary pending from agent."
-    news_report = final_state.get("news_report") or "News and catalysts collected by agents."
-    sentiment_report = final_state.get("sentiment_report") or "Sentiment sample not provided."
-    pm_decision = final_state.get("final_trade_decision") or (decision or "Hold")
+    # Content extraction and cleaning
+    market_report = _clean_agent_text(final_state.get("market_report") or "Market context summarized by agents unavailable.")
+    fundamentals_report = _clean_agent_text(final_state.get("fundamentals_report") or "Fundamentals summary pending from agent.")
+    news_report = _clean_agent_text(final_state.get("news_report") or "News and catalysts collected by agents.")
+    sentiment_report = _clean_agent_text(final_state.get("sentiment_report") or "Sentiment sample not provided.")
+    pm_decision = _clean_agent_text(final_state.get("final_trade_decision") or (decision or "Hold"))
+
+    # Extract sentiment score if present
+    sentiment_score_match = re.search(r"(?:Sentiment Score|Score):\s*(\d+(?:/\d+)?)", sentiment_report, re.IGNORECASE)
+    sentiment_score_display = ""
+    if sentiment_score_match:
+        sentiment_score_display = f"\\textbf{{Sentiment Score:}} {sentiment_score_match.group(1)} \\\\"
 
     thesis_points: List[str] = []
     investment_plan = final_state.get("investment_plan") or ""
@@ -734,19 +904,22 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
         ]
 
     risk_state = final_state.get("risk_debate_state", {}) or {}
-    risk_notes = risk_state.get("history") or "Risk committee notes not captured."
+    risk_notes = _clean_agent_text(risk_state.get("history") or "Risk committee notes not captured.")
 
-    # Scenario table
-    def table_row(label: str, value: str) -> str:
-        return rf"{_latex_escape(label)} & {_latex_escape(value)} \\ \hline"
+    # Scenario table with reasoning
+    def table_row(label: str, value: str, reasoning: str) -> str:
+        return rf"{_latex_escape(label)} & {_latex_escape(value)} & {_latex_escape(reasoning)} \\ \hline"
 
     scenario_rows = "\n".join(
         table_row(
             f"{case.name} ({case.probability*100:.0f}% prob)",
             f"${case.price:,.2f} | {_fmt_pct(case.return_pct)}",
+            case.reasoning
         )
         for case in scenarios
     )
+    
+    logger.info(f"Report generation completed in {time.time() - total_start:.2f}s")
 
     # Peers table
     peer_rows = []
@@ -837,6 +1010,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 {_latex_format_text(market_report)}
 
 \\textbf{{Competitive Positioning:}}
+{sentiment_score_display}
 {_latex_format_text(sentiment_report)}
 
 \\section{{Financial Analysis}}
@@ -864,19 +1038,30 @@ EBITDA margin trend is visualized below.
 \\caption{{EBITDA Margin Trajectory}}
 \\end{{figure}}
 
+"""
+
+    if include_ta:
+        latex += f"""
 \\section{{Technical Analysis}}
+"""
+        if rsi_chart:
+            latex += f"""
 \\begin{{figure}}[H]
 \\centering
 {rsi_chart}
 \\caption{{Relative Strength Index (14)}}
 \\end{{figure}}
-
+"""
+        if macd_chart:
+            latex += f"""
 \\begin{{figure}}[H]
 \\centering
 {macd_chart}
 \\caption{{MACD Indicator}}
 \\end{{figure}}
+"""
 
+    latex += f"""
 \\section{{Valuation}}
 \\begin{{table}}[H]
 \\centering
@@ -891,9 +1076,9 @@ EBITDA margin trend is visualized below.
 \\end{{figure}}
 
 \\subsection{{Scenario Analysis}}
-\\begin{{longtable}}{{p{{0.45\\linewidth}}p{{0.45\\linewidth}}}}
+\\begin{{longtable}}{{p{{0.25\\linewidth}}p{{0.25\\linewidth}}p{{0.40\\linewidth}}}}
 \\toprule
-\\textbf{{Scenario}} & \\textbf{{Outcome}} \\\\
+\\textbf{{Scenario}} & \\textbf{{Outcome}} & \\textbf{{Reasoning}} \\\\
 \\midrule
 {scenario_rows}
 \\bottomrule

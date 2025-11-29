@@ -60,14 +60,14 @@ Select indicators that provide diverse and complementary information. Avoid redu
             
             CRITICAL OUTPUT FORMAT:
             You must return your final response as a JSON object with the following structure:
-            {
+            {{
                 "report": "Your detailed Markdown report here...",
-                "data": {
+                "data": {{
                     "signal": "bullish" | "bearish" | "neutral",
                     "confidence": 0.0 to 1.0,
-                    "key_metrics": { "metric_name": "value", ... }
-                }
-            }
+                    "key_metrics": {{ "metric_name": "value", ... }}
+                }}
+            }}
             """
         )
 

@@ -28,6 +28,10 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
+import warnings
+
+# Suppress yfinance FutureWarnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 console = Console()
 
@@ -1032,15 +1036,43 @@ def _build_latex_report(final_state, selections, decision, message_buffer, confi
 
 def save_structured_reports(final_state, selections, report_dir, message_buffer, decision, config):
     """Persist the investment memo as a single LaTeX file."""
+    import logging
+    
+    # Configure logging to file
+    log_file = report_dir / "report_generation.log"
+    logging.basicConfig(
+        filename=str(log_file),
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Starting report generation sequence...")
+    
+    # Validate final_state
+    required_keys = ["market_report", "fundamentals_report", "final_trade_decision"]
+    missing_keys = [k for k in required_keys if not final_state.get(k)]
+    if missing_keys:
+        logger.warning(f"Missing keys in final_state: {missing_keys}")
+        console.print(f"[yellow]Warning: Missing data for report: {missing_keys}[/yellow]")
+
     from cli.report_generator import build_latex_report, build_markdown_report
 
-    latex_report = build_latex_report(final_state, selections, decision, report_dir)
-    (report_dir / "final_report.tex").write_text(latex_report)
-    console.print(f"[green]Saved LaTeX report to {report_dir / 'final_report.tex'}[/green]")
+    try:
+        latex_report = build_latex_report(final_state, selections, decision, report_dir)
+        (report_dir / "final_report.tex").write_text(latex_report)
+        console.print(f"[green]Saved LaTeX report to {report_dir / 'final_report.tex'}[/green]")
+    except Exception as e:
+        logger.error(f"Failed to generate LaTeX report: {e}", exc_info=True)
+        console.print(f"[red]Failed to generate LaTeX report. See {log_file} for details.[/red]")
 
-    markdown_report = build_markdown_report(final_state, selections, decision)
-    (report_dir / "final_report.md").write_text(markdown_report)
-    console.print(f"[green]Saved Markdown report to {report_dir / 'final_report.md'}[/green]")
+    try:
+        markdown_report = build_markdown_report(final_state, selections, decision)
+        (report_dir / "final_report.md").write_text(markdown_report)
+        console.print(f"[green]Saved Markdown report to {report_dir / 'final_report.md'}[/green]")
+    except Exception as e:
+        logger.error(f"Failed to generate Markdown report: {e}", exc_info=True)
+        console.print(f"[red]Failed to generate Markdown report. See {log_file} for details.[/red]")
 
 
 def update_research_team_status(status):
@@ -1068,10 +1100,9 @@ def extract_content_string(content):
     else:
         return str(content)
 
-def run_analysis(ticker: Optional[str] = None, quick: bool = False):
-    # First get all user selections
-    selections = get_user_selections(ticker=ticker, quick=quick)
+import asyncio
 
+async def run_analysis_async(selections: dict):
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
     config["max_debate_rounds"] = selections["research_depth"]
@@ -1181,7 +1212,7 @@ def run_analysis(ticker: Optional[str] = None, quick: bool = False):
 
         # Stream the analysis
         trace = []
-        for chunk in graph.graph.stream(init_agent_state, **args):
+        async for chunk in graph.graph.astream(init_agent_state, **args):
             if len(chunk["messages"]) > 0:
                 # Get the last message from the chunk
                 last_message = chunk["messages"][-1]
@@ -1412,8 +1443,20 @@ def run_analysis(ticker: Optional[str] = None, quick: bool = False):
             trace.append(chunk)
 
         # Get final state and decision
+        if not trace:
+            console.print("[red]Error: No execution trace generated. The graph may have failed to start.[/red]")
+            return
+
         final_state = trace[-1]
-        decision = graph.process_signal(final_state["final_trade_decision"])
+        
+        decision = "Hold" # Default decision
+        if "final_trade_decision" in final_state and final_state["final_trade_decision"]:
+            try:
+                decision = graph.process_signal(final_state["final_trade_decision"])
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not process signal: {e}. Defaulting to 'Hold'.[/yellow]")
+        else:
+            console.print("[yellow]Warning: No final trade decision found in state. Defaulting to 'Hold'.[/yellow]")
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
@@ -1440,7 +1483,11 @@ def analyze(
     ticker: Optional[str] = typer.Option(None, help="Ticker symbol to analyze"),
     quick: bool = typer.Option(False, "--quick", "-q", help="Skip questionnaire and use defaults"),
 ):
-    run_analysis(ticker=ticker, quick=quick)
+    # First get all user selections synchronously (avoids nested event loop issues)
+    selections = get_user_selections(ticker=ticker, quick=quick)
+    
+    # Then run the async analysis
+    asyncio.run(run_analysis_async(selections))
 
 
 if __name__ == "__main__":

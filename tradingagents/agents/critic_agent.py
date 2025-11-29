@@ -15,25 +15,31 @@ def create_critic_agent(llm):
         news_data = state.get("news_data", {})
         fundamentals_data = state.get("fundamentals_data", {})
 
-        system_message = f"""You are a Critical Reviewer for a trading agent system. Your job is to review the reports and data provided by four analysts: Market, Social Sentiment, News, and Fundamentals.
+        # Prepare data strings
+        market_data_str = json.dumps(market_data, indent=2)
+        sentiment_data_str = json.dumps(sentiment_data, indent=2)
+        news_data_str = json.dumps(news_data, indent=2)
+        fundamentals_data_str = json.dumps(fundamentals_data, indent=2)
+
+        system_message = """You are a Critical Reviewer for a trading agent system. Your job is to review the reports and data provided by four analysts: Market, Social Sentiment, News, and Fundamentals.
 
         **Analyst Outputs:**
         
         **Market Analyst:**
         Report: {market_report}
-        Data: {json.dumps(market_data, indent=2)}
+        Data: {market_data}
         
         **Social Sentiment Analyst:**
         Report: {sentiment_report}
-        Data: {json.dumps(sentiment_data, indent=2)}
+        Data: {sentiment_data}
         
         **News Analyst:**
         Report: {news_report}
-        Data: {json.dumps(news_data, indent=2)}
+        Data: {news_data}
         
         **Fundamentals Analyst:**
         Report: {fundamentals_report}
-        Data: {json.dumps(fundamentals_data, indent=2)}
+        Data: {fundamentals_data}
         
         **Your Task:**
         1.  **Consistency Check:** Identify any contradictions between the analysts. (e.g., Market says "Strong Uptrend" but Fundamentals says "Revenue Collapsing").
@@ -60,7 +66,16 @@ def create_critic_agent(llm):
         ])
         
         chain = prompt | llm
-        result = chain.invoke({})
+        result = chain.invoke({
+            "market_report": market_report,
+            "market_data": market_data_str,
+            "sentiment_report": sentiment_report,
+            "sentiment_data": sentiment_data_str,
+            "news_report": news_report,
+            "news_data": news_data_str,
+            "fundamentals_report": fundamentals_report,
+            "fundamentals_data": fundamentals_data_str
+        })
         
         report = result.content
         critic_data = {}

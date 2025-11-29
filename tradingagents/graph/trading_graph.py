@@ -181,8 +181,8 @@ class TradingAgentsGraph:
             ),
         }
 
-    def propagate(self, company_name, trade_date):
-        """Run the trading agents graph for a company on a specific date."""
+    async def apropagate(self, company_name, trade_date):
+        """Run the trading agents graph for a company on a specific date asynchronously."""
 
         self.ticker = company_name
 
@@ -195,7 +195,7 @@ class TradingAgentsGraph:
         if self.debug:
             # Debug mode with tracing
             trace = []
-            for chunk in self.graph.stream(init_agent_state, **args):
+            async for chunk in self.graph.astream(init_agent_state, **args):
                 if len(chunk["messages"]) == 0:
                     pass
                 else:
@@ -205,7 +205,7 @@ class TradingAgentsGraph:
             final_state = trace[-1]
         else:
             # Standard mode without tracing
-            final_state = self.graph.invoke(init_agent_state, **args)
+            final_state = await self.graph.ainvoke(init_agent_state, **args)
 
         # Store current state for reflection
         self.curr_state = final_state
@@ -215,6 +215,11 @@ class TradingAgentsGraph:
 
         # Return decision and processed signal
         return final_state, self.process_signal(final_state["final_trade_decision"])
+
+    def propagate(self, company_name, trade_date):
+        """Run the trading agents graph for a company on a specific date."""
+        import asyncio
+        return asyncio.run(self.apropagate(company_name, trade_date))
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""

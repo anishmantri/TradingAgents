@@ -26,15 +26,15 @@ def create_social_media_analyst(llm):
             
             CRITICAL OUTPUT FORMAT:
             You must return your final response as a JSON object with the following structure:
-            {
+            {{
                 "report": "Your detailed Markdown report here...",
-                "data": {
+                "data": {{
                     "signal": "bullish" | "bearish" | "neutral",
                     "confidence": 0.0 to 1.0,
                     "sentiment_score": -1.0 to 1.0,
                     "key_topics": ["topic1", "topic2"]
-                }
-            }
+                }}
+            }}
             """,
         )
 

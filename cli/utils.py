@@ -128,14 +128,15 @@ def select_shallow_thinking_agent(provider) -> str:
     # Define shallow thinking llm engine options with their corresponding model names
     SHALLOW_AGENT_OPTIONS = {
         "openai": [
-            ("GPT-5.1 Mini - Lightweight frontier reasoning", "gpt-5.1-mini"),
             ("GPT-5.1 - Flagship frontier model", "gpt-5.1"),
-            ("GPT-5 Mini - Efficient 5-series option", "gpt-5-mini"),
             ("GPT-5 - General-purpose 5-series model", "gpt-5"),
-            ("GPT-4.1 Mini - Balanced lightweight model", "gpt-4.1-mini"),
+            ("GPT-5 Mini - Efficient 5-series option", "gpt-5-mini"),
+            ("GPT-5 Nano - Ultra-efficient option", "gpt-5-nano"),
             ("GPT-4.1 - Proven general-purpose model", "gpt-4.1"),
-            ("GPT-4o Mini - Fast multi-modal option", "gpt-4o-mini"),
+            ("GPT-4.1 Mini - Balanced lightweight model", "gpt-4.1-mini"),
+            ("GPT-4.1 Nano - Ultra-efficient 4-series", "gpt-4.1-nano"),
             ("GPT-4o - Standard multi-modal model", "gpt-4o"),
+            ("GPT-4o Mini - Fast multi-modal option", "gpt-4o-mini"),
         ],
         "anthropic": [
             ("Claude 3.5 Haiku - Fast inference tier", "claude-3-5-haiku-latest"),
@@ -193,14 +194,17 @@ def select_deep_thinking_agent(provider) -> str:
     # Define deep thinking llm engine options with their corresponding model names
     DEEP_AGENT_OPTIONS = {
         "openai": [
-            ("GPT-5.1 Pro - Frontier long-form reasoning", "gpt-5.1-pro"),
             ("GPT-5 Pro - Heavyweight reasoning", "gpt-5-pro"),
             ("GPT-5.1 - Flagship generalist", "gpt-5.1"),
-            ("GPT-5 - Advanced 5-series generalist", "gpt-5"),
-            ("o4-mini - Latest compact reasoning model", "o4-mini"),
-            ("o3-mini - Advanced lightweight reasoning", "o3-mini"),
-            ("o1 - Premier reasoning and problem-solving model", "o1"),
+            ("o3 Pro - Advanced reasoning", "o3-pro"),
+            ("o3 - Reasoning model", "o3"),
+            ("o3 Deep Research - Deep research capability", "o3-deep-research"),
+            ("o1 Pro - High-compute reasoning", "o1-pro"),
+            ("o1 - Premier reasoning", "o1"),
+            ("o4 Mini - Efficient reasoning", "o4-mini"),
+            ("o4 Mini Deep Research", "o4-mini-deep-research"),
             ("GPT-4.1 - Full-featured generalist", "gpt-4.1"),
+            ("GPT-4o - Versatile flagship", "gpt-4o"),
         ],
         "anthropic": [
             ("Claude 3.7 Sonnet (latest)", "claude-3-7-sonnet-latest"),

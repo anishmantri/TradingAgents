@@ -26,15 +26,15 @@ def create_news_analyst(llm):
             
             CRITICAL OUTPUT FORMAT:
             You must return your final response as a JSON object with the following structure:
-            {
+            {{
                 "report": "Your detailed Markdown report here...",
-                "data": {
+                "data": {{
                     "signal": "bullish" | "bearish" | "neutral",
                     "confidence": 0.0 to 1.0,
                     "impact_score": 0.0 to 10.0,
                     "key_events": ["event1", "event2"]
-                }
-            }
+                }}
+            }}
             """
         )
 

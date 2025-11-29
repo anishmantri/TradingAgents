@@ -8,3 +8,15 @@ class AnalystType(str, Enum):
     SOCIAL = "social"
     NEWS = "news"
     FUNDAMENTALS = "fundamentals"
+
+
+class ReportSection(BaseModel):
+    title: str
+    content: str
+
+
+class CLIOutput(BaseModel):
+    ticker: str
+    analysis_date: str
+    report_sections: Dict[str, Optional[str]]
+

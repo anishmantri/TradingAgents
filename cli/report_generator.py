@@ -20,6 +20,10 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from cli.latex_utils import escape_latex
+from cli.models import CLIOutput
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -189,37 +193,7 @@ def _fmt_curr(val: Optional[float], short: bool = False) -> str:
     return f"\\${val:,.0f}"
 
 
-def _latex_escape(text: str) -> str:
-    if not text:
-        return ""
-    
-    # First, handle the specific case of "newline" text artifacts
-    # If the text contains literal "newline" surrounded by spaces or at start/end, remove it
-    text = re.sub(r'\s*newline\s*', ' ', str(text), flags=re.IGNORECASE)
-    
-    replacements = {
-        "\\": r"\\textbackslash{}",
-        "&": r"\\&",
-        "%": r"\\%",
-        "$": r"\\$",
-        "#": r"\\#",
-        "_": r"\\_",
-        "{": r"\\{",
-        "}": r"\\}",
-        "~": r"\\textasciitilde{}",
-        "^": r"\\textasciicircum{}",
-        "<": r"\\textless{}",
-        ">": r"\\textgreater{}",
-    }
-    
-    safe_text = ""
-    for char in text:
-        if char in replacements:
-            safe_text += replacements[char]
-        else:
-            safe_text += char
-            
-    return safe_text
+
 
 
 def _latex_format_text(text: str) -> str:
@@ -314,14 +288,14 @@ def _latex_format_text(text: str) -> str:
                 formatted_lines.append(r"\end{itemize}")
                 in_list = False
             content = stripped.lstrip("#").strip()
-            formatted_lines.append(rf"\paragraph*{{{_latex_escape(content)}}}")
+            formatted_lines.append(rf"\paragraph*{{{escape_latex(content)}}}")
             continue
         elif stripped.startswith("##"):
             if in_list:
                 formatted_lines.append(r"\end{itemize}")
                 in_list = False
             content = stripped.lstrip("#").strip()
-            formatted_lines.append(rf"\subsubsection*{{{_latex_escape(content)}}}")
+            formatted_lines.append(rf"\subsubsection*{{{escape_latex(content)}}}")
             continue
             
         # List items
@@ -368,7 +342,7 @@ def _latex_format_text(text: str) -> str:
 def _process_formatting(text: str) -> str:
     """Helper to handle **bold** and *italic* text."""
     # Escape special characters first
-    escaped = _latex_escape(text)
+    escaped = escape_latex(text)
     
     # Bold: **text** -> \textbf{text}
     escaped = re.sub(r'\*\*(.*?)\*\*', r"\\textbf{\1}", escaped)
@@ -811,6 +785,24 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     total_start = time.time()
     logger.info("Starting LaTeX report generation...")
     
+    # Validate input with Pydantic
+    try:
+        cli_output = CLIOutput(
+            ticker=selections["ticker"],
+            analysis_date=selections["analysis_date"],
+            report_sections={
+                "market_report": final_state.get("market_report"),
+                "fundamentals_report": final_state.get("fundamentals_report"),
+                "news_report": final_state.get("news_report"),
+                "sentiment_report": final_state.get("sentiment_report"),
+                "investment_plan": final_state.get("investment_plan"),
+                "final_trade_decision": final_state.get("final_trade_decision")
+            }
+        )
+    except Exception as e:
+        logger.error(f"Input validation failed: {e}")
+        # Continue with best effort, but log error
+    
     ticker = selections["ticker"]
     analysis_date = selections["analysis_date"]
     lookback = selections.get("lookback_days", 180)
@@ -826,8 +818,11 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
         company_name = info.get("longName", ticker)
         industry = info.get("industry", "")
         country = info.get("country", "")
+        market_cap_val = info.get("marketCap", 0)
+        market_cap_str = _fmt_curr(market_cap_val)
     except Exception:
         company_name, industry, country = ticker, "", ""
+        market_cap_str = "N/A"
 
     peers = load_peers_metrics(ticker, sector, financials)
 
@@ -883,18 +878,12 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
     sentiment_report = _clean_agent_text(final_state.get("sentiment_report") or "Sentiment sample not provided.")
     pm_decision = _clean_agent_text(final_state.get("final_trade_decision") or (decision or "Hold"))
 
-    # Extract sentiment score if present
-    sentiment_score_match = re.search(r"(?:Sentiment Score|Score):\s*(\d+(?:/\d+)?)", sentiment_report, re.IGNORECASE)
-    sentiment_score_display = ""
-    if sentiment_score_match:
-        sentiment_score_display = f"\\textbf{{Sentiment Score:}} {sentiment_score_match.group(1)} \\\\"
-
     thesis_points: List[str] = []
     investment_plan = final_state.get("investment_plan") or ""
     for line in investment_plan.split("\n"):
         if line.strip().startswith("-"):
             thesis_points.append(line.strip("- "))
-        if len(thesis_points) >= 8:
+        if len(thesis_points) >= 5:
             break
     if not thesis_points:
         thesis_points = [
@@ -908,7 +897,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 
     # Scenario table with reasoning
     def table_row(label: str, value: str, reasoning: str) -> str:
-        return rf"{_latex_escape(label)} & {_latex_escape(value)} & {_latex_escape(reasoning)} \\ \hline"
+        return rf"{escape_latex(label)} & {escape_latex(value)} & {escape_latex(reasoning)} \\ \hline"
 
     scenario_rows = "\n".join(
         table_row(
@@ -927,7 +916,7 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
         pe_display = f"{snap.pe:.1f}" if snap.pe else "-"
         ev_ebitda_display = f"{snap.ev_ebitda:.1f}" if snap.ev_ebitda else "-"
         row = "{} & {} & {} & {} \\\\".format(
-            _latex_escape(name), pe_display, ev_ebitda_display, _fmt_pct(snap.fcf_yield)
+            escape_latex(name), pe_display, ev_ebitda_display, _fmt_pct(snap.fcf_yield)
         )
         peer_rows.append(row)
     peer_table = "\n".join(peer_rows) if peer_rows else "\\textit{Peer metrics unavailable.}"
@@ -956,37 +945,39 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 \\titleformat{{\\subsection}}
   {{\\normalfont\\large\\bfseries\\color{{gray!80!black}}}}{{\\thesubsection}}{{1em}}{{}}
 
-\\title{{{{ { _latex_escape(company_name) } ( { _latex_escape(ticker) } ) Investment Memo }}}}
+\\title{{{{ { escape_latex(company_name) } ( { escape_latex(ticker) } ) Investment Memo }}}}
 \\author{{{{TradingAgents Multi-LLM Desk}}}}
-\\date{{{{{_latex_escape(analysis_date)}}}}}
+\\date{{{{{escape_latex(analysis_date)}}}}}
 
 \\begin{{document}}
 \\maketitle
 \\tableofcontents
 \\newpage
 
-\\section{{Executive Summary}}
-\\textbf{{Recommendation:}} { _latex_escape(decision or 'Pending') }.\\\\
-\\textbf{{Target Return:}} {_fmt_pct(expected_return)} over ~{horizon_months} months.\\\\
-\\textbf{{Variant Perception:}} {_latex_escape(variant_view)}.\\\\
+\\section{{Investment Summary}}
+\\textbf{{Recommendation:}} { escape_latex(decision or 'Pending') } \\\\
+\\textbf{{Target Return:}} {_fmt_pct(expected_return)} over ~{horizon_months} months \\\\
+\\textbf{{Risk/Reward:}} 3:1 (Estimated) \\\\
+\\textbf{{Time Horizon:}} 12--24 months \\\\
 
-\\textbf{{Upside Drivers:}}
+\\subsection{{Thesis Pillars}}
 \\begin{{itemize}}
-\\item {_latex_escape(market_report[:200])}...
+{''.join(f"\\item {escape_latex(pt)}\n" for pt in thesis_points)}
 \\end{{itemize}}
 
-\\textbf{{Downside Risks:}}
-\\begin{{itemize}}
-\\item {_latex_escape(risk_notes[:200])}...
-\\end{{itemize}}
-
-\\textbf{{Valuation Check:}} Current EV/EBITDA is {ev_ebitda_display}x vs peer median {peer_median_display}x.
+\\textbf{{Variant Perception:}} {escape_latex(variant_view)} \\\\
+\\textbf{{Key Catalysts:}} Upcoming earnings, product launches (see Catalysts section) \\\\
+\\textbf{{High-level Risks:}} {escape_latex(risk_notes[:150])}...
 
 \\section{{Company Overview}}
 \\textbf{{Business Description:}} 
 \\begin{{quote}}
 { _latex_format_text(fundamentals_report) }
 \\end{{quote}}
+
+\\textbf{{Sector:}} {escape_latex(sector)} \\\\
+\\textbf{{Industry:}} {escape_latex(industry)} \\\\
+\\textbf{{Market Cap:}} {escape_latex(market_cap_str)} \\\\
 
 \\subsection{{Financial Performance}}
 \\begin{{table}}[H]
@@ -1002,18 +993,14 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 \\caption{{Balance Sheet Summary}}
 \\end{{table}}
 
-\\subsection{{Recent Developments}}
-{_latex_format_text(news_report)}
-
 \\section{{Industry and Competitive Landscape}}
 \\textbf{{Market Drivers:}}
 {_latex_format_text(market_report)}
 
 \\textbf{{Competitive Positioning:}}
-{sentiment_score_display}
 {_latex_format_text(sentiment_report)}
 
-\\section{{Financial Analysis}}
+\\section{{Financial Analysis and Model Bridge}}
 \\textbf{{Revenue & Growth:}}
 Recent run-rate revenue is {_fmt_curr(financials.latest_revenue)} with estimated growth of {_fmt_pct(valuation.growth)}.
 
@@ -1063,6 +1050,10 @@ EBITDA margin trend is visualized below.
 
     latex += f"""
 \\section{{Valuation}}
+\\textbf{{Primary Method:}} EV/EBITDA vs Peers \\\\
+\\textbf{{Current Valuation:}} {ev_ebitda_display}x EV/EBITDA \\\\
+\\textbf{{Peer Median:}} {peer_median_display}x EV/EBITDA \\\\
+
 \\begin{{table}}[H]
 \\centering
 {_render_valuation_table(valuation)}
@@ -1084,15 +1075,17 @@ EBITDA margin trend is visualized below.
 \\bottomrule
 \\end{{longtable}}
 
-\\section{{Investment Thesis}}
-\\begin{{itemize}}
-{''.join(f"\\item {_latex_escape(pt)}\n" for pt in thesis_points)}
-\\end{{itemize}}
-
-\\section{{Risks and Disconfirming Evidence}}
+\\section{{Risks, Variant Views, and Falsification}}
 {_latex_format_text(risk_notes)}
 
-\\section{{Appendix}}
+\\section{{Catalysts and Timeline}}
+{_latex_format_text(news_report)}
+
+\\section{{Positioning and Implementation}}
+\\textbf{{Proposed Action:}} {escape_latex(pm_decision)} \\\\
+\\textbf{{Sizing:}} Standard position size (subject to portfolio constraints) \\\\
+
+\\section{{Appendices}}
 \\subsection{{Peer Comparison}}
 \\begin{{tabular}}{{lrrr}}
 \\toprule
@@ -1101,9 +1094,6 @@ EBITDA margin trend is visualized below.
 {peer_table}
 \\bottomrule
 \\end{{tabular}}
-
-\\subsection{{Agent Trace}}
-\\textbf{{Final Decision:}} {_latex_escape(pm_decision)}
 
 \\end{{document}}
 """

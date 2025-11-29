@@ -28,6 +28,7 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
+from cli.latex_utils import escape_latex as _latex_escape
 import warnings
 
 # Suppress yfinance FutureWarnings
@@ -881,22 +882,7 @@ def _build_markdown_report(final_state, selections, decision, message_buffer, co
     return "\n".join(lines).strip() + "\n"
 
 
-def _latex_escape(text):
-    replacements = {
-        "\\": r"\textbackslash{}",
-        "&": r"\&",
-        "%": r"\%",
-        "$": r"\$",
-        "#": r"\#",
-        "_": r"\_",
-        "{": r"\{",
-        "}": r"\}",
-        "~": r"\textasciitilde{}",
-        "^": r"\textasciicircum{}",
-    }
-    for src, repl in replacements.items():
-        text = text.replace(src, repl)
-    return text
+
 
 
 def _latex_table(rows):
@@ -1057,10 +1043,12 @@ def save_structured_reports(final_state, selections, report_dir, message_buffer,
         console.print(f"[yellow]Warning: Missing data for report: {missing_keys}[/yellow]")
 
     from cli.report_generator import build_latex_report, build_markdown_report
+    from cli.latex_utils import save_latex_debug
 
     try:
         latex_report = build_latex_report(final_state, selections, decision, report_dir)
         (report_dir / "final_report.tex").write_text(latex_report)
+        save_latex_debug(latex_report, report_dir / "debug_final_report.tex")
         console.print(f"[green]Saved LaTeX report to {report_dir / 'final_report.tex'}[/green]")
     except Exception as e:
         logger.error(f"Failed to generate LaTeX report: {e}", exc_info=True)

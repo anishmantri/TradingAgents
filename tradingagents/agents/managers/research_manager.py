@@ -19,23 +19,35 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the portfolio manager and debate facilitator, your role is to critically evaluate this round of debate and make a definitive decision: align with the bear analyst, the bull analyst, or choose Hold only if it is strongly justified based on the arguments presented.
+        prompt = f"""As the Chief Investment Officer (CIO), your role is to synthesize the debate between the Bull and Bear analysts into a definitive **Strategic Investment Plan**.
 
-Summarize the key points from both sides concisely, focusing on the most compelling evidence or reasoning. Your recommendation—Buy, Sell, or Hold—must be clear and actionable. Avoid defaulting to Hold simply because both sides have valid points; commit to a stance grounded in the debate's strongest arguments.
+**Objective:**
+Make a final decision (Buy, Sell, or Hold) and articulate the core thesis. Your output must be structured for direct inclusion in an investment memo.
 
-Additionally, develop a detailed investment plan for the trader. This should include:
+**Required Output Structure:**
 
-Your Recommendation: A decisive stance supported by the most convincing arguments.
-Rationale: An explanation of why these arguments lead to your conclusion.
-Strategic Actions: Concrete steps for implementing the recommendation.
-Take into account your past mistakes on similar situations. Use these insights to refine your decision-making and ensure you are learning and improving. Present your analysis conversationally, as if speaking naturally, without special formatting. 
+1. **Investment Thesis Pillars**:
+   - Provide 3-5 bullet points explaining *why* this opportunity exists.
+   - Focus on the "Variant Perception" (how your view differs from consensus).
+   - e.g., "- Market underestimates the margin expansion from the new SaaS product."
 
-Here are your past reflections on mistakes:
-\"{past_memory_str}\"
+2. **Key Catalysts**:
+   - List specific events that will drive the stock price to your target.
 
-Here is the debate:
-Debate History:
-{history}"""
+3. **Strategic Action**:
+   - Recommendation: Buy / Sell / Hold.
+   - Sizing: (e.g., "Initiate 2% position").
+   - Entry/Exit: (e.g., "Accumulate below $150").
+
+**Guidelines:**
+- Be decisive. Do not hedge your language (e.g., "It depends").
+- Use professional, institutional language.
+- Incorporate lessons from past mistakes: "{past_memory_str}"
+
+**Debate History:**
+{history}
+
+Synthesize this into the structured plan above."""
         response = llm.invoke(prompt)
 
         new_investment_debate_state = {

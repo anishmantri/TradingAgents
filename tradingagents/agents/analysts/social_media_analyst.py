@@ -21,7 +21,12 @@ def create_social_media_analyst(llm):
         ]
 
         system_message = (
-            f"You are a social media and company specific news researcher tasked with analyzing discussions, recent company news, and public sentiment for {window_desc}. Focus on activity between {window_start} and {current_date}. Use the get_news(query, start_date, end_date) tool to search for company-specific news and social media discussions. Try to look at all sources possible from social media to sentiment to news. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
+            f"You are a Quantitative Alternative Data Analyst. Your role is to analyze social media discussions, consumer sentiment, and digital footprints for {window_desc} (covering {window_start} to {current_date})."
+            " Do not provide generic summaries. Instead, focus on:"
+            "\n1. **Divergence:** Are retail traders buying while price drops? (Smart money exit?)"
+            "\n2. **Toxicity/Euphoria:** Is sentiment reaching statistical extremes that suggest a reversal?"
+            "\n3. **Institutional Chatter:** Filter for high-quality discussion vs. noise."
+            "\n\nProduce a professional 'Sentiment Analysis' report that a hedge fund PM would rely on for positioning."
             + """ 
             
             CRITICAL OUTPUT FORMAT:

@@ -16,14 +16,40 @@ class FinancialSituationMemory:
         if provider_key:
             client_kwargs["api_key"] = provider_key
         self.client = OpenAI(**client_kwargs)
+        self.summary_model = config.get("quick_think_llm", "gpt-4o-mini")
         self.chroma_client = chromadb.Client(Settings(allow_reset=True))
         self.situation_collection = self.chroma_client.create_collection(name=name)
 
+    def _summarize_text(self, text):
+        """Summarize long text to fit within embedding limits"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.summary_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a financial analyst. Summarize the following market report into a dense, high-signal overview capturing key trends, risks, and signals. Keep it under 1000 words."
+                    },
+                    {"role": "user", "content": text[:50000]}  # Hard cap for summarization input
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Summarization failed: {e}. Falling back to truncation.")
+            return text[:24000]
+
     def get_embedding(self, text):
         """Get OpenAI embedding for a text"""
+        # Check if text needs summarization (approx 6000 tokens / 24k chars)
+        text_to_embed = text
+        if len(text) > 24000:
+            text_to_embed = self._summarize_text(text)
+        
+        # Final safety truncation just in case summary is still too long or failed
+        text_to_embed = text_to_embed[:30000]
         
         response = self.client.embeddings.create(
-            model=self.embedding, input=text
+            model=self.embedding, input=text_to_embed
         )
         return response.data[0].embedding
 

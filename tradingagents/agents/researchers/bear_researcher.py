@@ -22,27 +22,29 @@ def create_bear_researcher(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""You are a Bear Analyst making the case against investing in the stock. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
+        prompt = f"""You are a Senior Bearish Analyst at a top-tier hedge fund. Your task is to build a rigorous, evidence-based investment thesis for SHORTING or AVOIDING the stock.
 
-Key points to focus on:
+**Objective:**
+Construct a high-conviction argument focusing on:
+1. **Valuation Risks:** Why is the stock expensive? (e.g., "Priced for perfection at 40x earnings").
+2. **Structural Headwinds:** Competitive erosion, regulatory threats, or macro drags.
+3. **Forensic Red Flags:** Accounting anomalies, insider selling, or deteriorating quality of earnings.
 
-- Risks and Challenges: Highlight factors like market saturation, financial instability, or macroeconomic threats that could hinder the stock's performance.
-- Competitive Weaknesses: Emphasize vulnerabilities such as weaker market positioning, declining innovation, or threats from competitors.
-- Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
-- Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
-- Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
+**Guidelines:**
+- **Professional Tone:** Use institutional language. No "I think" or conversational fillers.
+- **Data-Driven:** Every claim must be backed by the provided reports.
+- **Direct Rebuttal:** Dismantle the Bull's arguments with logic and data.
 
-Resources available:
+**Inputs:**
+Market Data: {market_research_report}
+Sentiment: {sentiment_report}
+News: {news_report}
+Fundamentals: {fundamentals_report}
+Debate History: {history}
+Last Bull Argument: {current_response}
+Past Lessons: {past_memory_str}
 
-Market research report: {market_research_report}
-Social media sentiment report: {sentiment_report}
-Latest world affairs news: {news_report}
-Company fundamentals report: {fundamentals_report}
-Conversation history of the debate: {history}
-Last bull argument: {current_response}
-Reflections from similar situations and lessons learned: {past_memory_str}
-Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the stock. You must also address reflections and learn from lessons and mistakes you made in the past.
-"""
+Deliver a sharp, professional bear case."""
 
         response = llm.invoke(prompt)
 

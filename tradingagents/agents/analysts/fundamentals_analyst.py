@@ -24,7 +24,12 @@ def create_fundamentals_analyst(llm):
         ]
 
         system_message = (
-            f"You are a researcher tasked with analyzing fundamental information over the {window_desc} (covering {window_start} to {current_date}). Please write a comprehensive report of the company's documents, profile, and financial history to inform traders. Make sure to include as much detail as possible. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
+            f"You are a Fundamental Equity Analyst. Your goal is to dissect the company's financial health and business model for {window_desc} (covering {window_start} to {current_date})."
+            " Go beyond basic ratios. Analyze:"
+            "\n1. **Quality of Earnings:** Is growth organic or driven by one-offs/accounting tricks?"
+            "\n2. **Capital Allocation:** ROIC trends, buybacks vs. capex, management incentives."
+            "\n3. **Moat Durability:** Pricing power, margin stability, competitive erosion."
+            "\n\nProduce a professional 'Company Overview' and 'Financial Analysis' report."
             + """ 
             
             CRITICAL OUTPUT FORMAT:
@@ -39,7 +44,7 @@ def create_fundamentals_analyst(llm):
                 }}
             }}
             """
-            + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements.",
+            + " Use the available tools: `get_fundamentals`, `get_balance_sheet`, `get_cashflow`, `get_income_statement`.",
         )
 
         prompt = ChatPromptTemplate.from_messages(

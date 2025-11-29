@@ -21,7 +21,12 @@ def create_news_analyst(llm):
         ]
 
         system_message = (
-            f"You are a news researcher tasked with analyzing trading-relevant developments over the {window_desc}. Focus on news released between {window_start} and {current_date}. Use the available tools: get_news(query, start_date, end_date) for company-specific or targeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news. Do not simply state the trends are mixed, provide detailed and finegrained analysis and insights that may help traders make decisions."
+            f"You are an Event-Driven Analyst. Your job is to identify specific catalysts and macro headwinds/tailwinds for {window_desc} (covering {window_start} to {current_date})."
+            " Do not just list headlines. Analyze:"
+            "\n1. **Catalysts:** Earnings, product launches, regulatory rulings, M&A."
+            "\n2. **Impact:** How does each event change the valuation model? (e.g., 'New regulation increases compliance costs by 15%')."
+            "\n3. **Consensus vs. Reality:** What is the market pricing in vs. what is likely to happen?"
+            "\n\nProduce a professional 'Catalysts and Timeline' report."
             + """ 
             
             CRITICAL OUTPUT FORMAT:

@@ -22,26 +22,45 @@ def create_risk_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the Risk Management Judge and Debate Facilitator, your goal is to evaluate the debate between three risk analysts—Risky, Neutral, and Safe/Conservative—and determine the best course of action for the trader. Your decision must result in a clear recommendation: Buy, Sell, or Hold. Choose Hold only if strongly justified by specific arguments, not as a fallback when all sides seem valid. Strive for clarity and decisiveness.
+        prompt = f"""As the Chief Risk Officer (CRO) and Debate Judge, your goal is to synthesize the debate between the Risky, Neutral, and Safe analysts into a professional, high-quality "Risks, Variant Views, and Falsification" section for an investment memo.
 
-Guidelines for Decision-Making:
-1. **Summarize Key Arguments**: Extract the strongest points from each analyst, focusing on relevance to the context.
-2. **Provide Rationale**: Support your recommendation with direct quotes and counterarguments from the debate.
-3. **Refine the Trader's Plan**: Start with the trader's original plan, **{trader_plan}**, and adjust it based on the analysts' insights.
-4. **Learn from Past Mistakes**: Use lessons from **{past_memory_str}** to address prior misjudgments and improve the decision you are making now to make sure you don't make a wrong BUY/SELL/HOLD call that loses money.
+Your output must be strictly structured and professional. Do not use conversational language. Do not summarize the debate as a narrative (e.g., "The risky analyst said..."). Instead, integrate the arguments into a cohesive risk assessment.
 
-Deliverables:
-- A clear and actionable recommendation: Buy, Sell, or Hold.
-- Detailed reasoning anchored in the debate and past reflections.
+**Required Output Structure:**
 
----
+1. **Key Fundamental Risks**:
+   - List 3-5 major risks (e.g., competition, execution, regulation, macro).
+   - For each, briefly explain the mechanism and potential impact.
 
-**Analysts Debate History:**  
+2. **Position-Specific Risks**:
+   - Address liquidity, event risk, or specific factors relevant to the trade structure.
+
+3. **Variant Views (The Bear Case)**:
+   - Synthesize the strongest arguments from the Safe/Conservative analyst.
+   - Explain why the market might be right to be skeptical (if applicable).
+
+4. **Falsification Criteria**:
+   - Clearly state observable conditions that would invalidate the investment thesis (e.g., "Revenue growth below 10%", "Churn increasing to 5%").
+   - "I would change my mind if..."
+
+5. **Downside Scenario**:
+   - Describe a specific bear case scenario (probability and impact).
+
+6. **Risk Mitigants**:
+   - How can the trader hedge or structure the trade to reduce these risks?
+
+7. **Final Recommendation**:
+   - Buy, Sell, or Hold.
+   - Brief justification based on the risk/reward skew.
+
+**Inputs:**
+Trader's Plan: {trader_plan}
+Past Lessons: {past_memory_str}
+
+**Debate History:**
 {history}
 
----
-
-Focus on actionable insights and continuous improvement. Build on past lessons, critically evaluate all perspectives, and ensure each decision advances better outcomes."""
+Synthesize this information into the structured format above. Be decisive and professional."""
 
         response = llm.invoke(prompt)
 

@@ -781,6 +781,19 @@ def _render_valuation_table(val: ValuationSnapshot) -> str:
     return latex
 
 
+def _strip_markdown(text: str) -> str:
+    """Remove Markdown formatting for plain text summaries."""
+    if not text:
+        return ""
+    # Remove bold/italic
+    text = re.sub(r'\*\*|__', '', text)
+    text = re.sub(r'\*|_', '', text)
+    # Remove headers
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+    # Remove links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    return text
+
 def build_latex_report(final_state: dict, selections: dict, decision: Optional[str], report_dir: Path) -> str:
     total_start = time.time()
     logger.info("Starting LaTeX report generation...")
@@ -893,7 +906,11 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
         ]
 
     risk_state = final_state.get("risk_debate_state", {}) or {}
-    risk_notes = _clean_agent_text(risk_state.get("history") or "Risk committee notes not captured.")
+    # Use the judge's synthesized decision if available, otherwise fall back to history
+    risk_notes = _clean_agent_text(risk_state.get("judge_decision") or risk_state.get("history") or "Risk committee notes not captured.")
+    
+    # Prepare risk summary (stripped of markdown and truncated)
+    risk_summary = _strip_markdown(risk_notes)[:150] + "..."
 
     # Scenario table with reasoning
     def table_row(label: str, value: str, reasoning: str) -> str:
@@ -962,12 +979,12 @@ def build_latex_report(final_state: dict, selections: dict, decision: Optional[s
 
 \\subsection{{Thesis Pillars}}
 \\begin{{itemize}}
-{''.join(f"\\item {escape_latex(pt)}\n" for pt in thesis_points)}
+{''.join(f"\\item {_process_formatting(pt)}\n" for pt in thesis_points)}
 \\end{{itemize}}
 
 \\textbf{{Variant Perception:}} {escape_latex(variant_view)} \\\\
 \\textbf{{Key Catalysts:}} Upcoming earnings, product launches (see Catalysts section) \\\\
-\\textbf{{High-level Risks:}} {escape_latex(risk_notes[:150])}...
+\\textbf{{High-level Risks:}} {escape_latex(risk_summary)}
 
 \\section{{Company Overview}}
 \\textbf{{Business Description:}} 
@@ -1082,7 +1099,8 @@ EBITDA margin trend is visualized below.
 {_latex_format_text(news_report)}
 
 \\section{{Positioning and Implementation}}
-\\textbf{{Proposed Action:}} {escape_latex(pm_decision)} \\\\
+\\textbf{{Proposed Action:}} \\
+{_latex_format_text(pm_decision)}\\
 \\textbf{{Sizing:}} Standard position size (subject to portfolio constraints) \\\\
 
 \\section{{Appendices}}

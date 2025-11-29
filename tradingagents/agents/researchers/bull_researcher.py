@@ -1,7 +1,7 @@
 from langchain_core.messages import AIMessage
 import time
 import json
-
+from cli.schema import DetailedThesisPillar, AlternativeView
 
 def create_bull_researcher(llm, memory):
     def bull_node(state) -> dict:
@@ -21,6 +21,10 @@ def create_bull_researcher(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+
+        # Get schemas
+        pillar_schema = json.dumps(DetailedThesisPillar.model_json_schema(), indent=2)
+        view_schema = json.dumps(AlternativeView.model_json_schema(), indent=2)
 
         prompt = f"""You are a Senior Bullish Analyst at a top-tier hedge fund. Your task is to build a rigorous, evidence-based investment thesis for LONGING the stock.
 
@@ -44,18 +48,50 @@ Debate History: {history}
 Last Bear Argument: {current_response}
 Past Lessons: {past_memory_str}
 
+CRITICAL OUTPUT FORMAT:
+You must return your final response as a JSON object with the following structure:
+{{
+    "argument": "Your sharp, professional bull case argument (text)...",
+    "thesis_pillars": [{pillar_schema}],
+    "alternative_view": {view_schema}
+}}
+
+Ensure the JSON is valid and strictly follows the schema.
 Deliver a sharp, professional bull case."""
 
         response = llm.invoke(prompt)
+        
+        argument = ""
+        bull_data = {}
 
-        argument = f"Bull Analyst: {response.content}"
+        try:
+            content = response.content
+            json_str = content
+            if "```json" in content:
+                json_str = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                json_str = content.split("```")[1].split("```")[0]
+            
+            data = json.loads(json_str.strip())
+            if isinstance(data, dict):
+                argument = data.get("argument", "")
+                bull_data = {
+                    "thesis_pillars": data.get("thesis_pillars", []),
+                    "alternative_view": data.get("alternative_view", {})
+                }
+        except Exception:
+            argument = response.content
+            pass
+
+        formatted_argument = f"Bull Analyst: {argument}"
 
         new_investment_debate_state = {
-            "history": history + "\n" + argument,
-            "bull_history": bull_history + "\n" + argument,
+            "history": history + "\n" + formatted_argument,
+            "bull_history": bull_history + "\n" + formatted_argument,
             "bear_history": investment_debate_state.get("bear_history", ""),
-            "current_response": argument,
+            "current_response": formatted_argument,
             "count": investment_debate_state["count"] + 1,
+            "bull_data": bull_data # Store structured data
         }
 
         return {"investment_debate_state": new_investment_debate_state}

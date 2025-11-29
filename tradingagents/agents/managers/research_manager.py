@@ -1,6 +1,6 @@
 import time
 import json
-
+from cli.schema import ExecutiveSummary, ThesisPillar, RiskRewardScenario
 
 def create_research_manager(llm, memory):
     def research_manager_node(state) -> dict:
@@ -18,6 +18,9 @@ def create_research_manager(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+
+        # Get schemas
+        exec_summary_schema = json.dumps(ExecutiveSummary.model_json_schema(), indent=2)
 
         prompt = f"""As the Chief Investment Officer (CIO), your role is to synthesize the debate between the Bull and Bear analysts into a definitive **Strategic Investment Plan**.
 
@@ -47,21 +50,49 @@ Make a final decision (Buy, Sell, or Hold) and articulate the core thesis. Your 
 **Debate History:**
 {history}
 
+CRITICAL OUTPUT FORMAT:
+You must return your final response as a JSON object with the following structure:
+{{
+    "decision_text": "Your detailed text decision...",
+    "executive_summary": {exec_summary_schema}
+}}
+
+Ensure the JSON is valid and strictly follows the schema.
 Synthesize this into the structured plan above."""
         response = llm.invoke(prompt)
 
+        decision_text = ""
+        executive_summary = {}
+
+        try:
+            content = response.content
+            json_str = content
+            if "```json" in content:
+                json_str = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                json_str = content.split("```")[1].split("```")[0]
+            
+            data = json.loads(json_str.strip())
+            if isinstance(data, dict):
+                decision_text = data.get("decision_text", "")
+                executive_summary = data.get("executive_summary", {})
+        except Exception:
+            decision_text = response.content
+            pass
+
         new_investment_debate_state = {
-            "judge_decision": response.content,
+            "judge_decision": decision_text,
             "history": investment_debate_state.get("history", ""),
             "bear_history": investment_debate_state.get("bear_history", ""),
             "bull_history": investment_debate_state.get("bull_history", ""),
-            "current_response": response.content,
+            "current_response": decision_text,
             "count": investment_debate_state["count"],
         }
 
         return {
             "investment_debate_state": new_investment_debate_state,
-            "investment_plan": response.content,
+            "investment_plan": decision_text,
+            "executive_summary": executive_summary # Store structured data
         }
 
     return research_manager_node

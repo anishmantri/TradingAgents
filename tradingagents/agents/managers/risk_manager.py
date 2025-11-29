@@ -1,6 +1,6 @@
 import time
 import json
-
+from cli.schema import RisksFalsification, Risk, FalsificationCondition, MonitoringPlan
 
 def create_risk_manager(llm, memory):
     def risk_manager_node(state) -> dict:
@@ -11,7 +11,7 @@ def create_risk_manager(llm, memory):
         risk_debate_state = state["risk_debate_state"]
         market_research_report = state["market_report"]
         news_report = state["news_report"]
-        fundamentals_report = state["news_report"]
+        fundamentals_report = state["fundamentals_report"] # Fixed variable name from "news_report"
         sentiment_report = state["sentiment_report"]
         trader_plan = state["investment_plan"]
 
@@ -21,6 +21,10 @@ def create_risk_manager(llm, memory):
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
+
+        # Get schemas
+        risks_schema = json.dumps(RisksFalsification.model_json_schema(), indent=2)
+        monitoring_schema = json.dumps(MonitoringPlan.model_json_schema(), indent=2)
 
         prompt = f"""As the Chief Risk Officer (CRO) and Debate Judge, your goal is to synthesize the debate between the Risky, Neutral, and Safe analysts into a professional, high-quality "Risks, Variant Views, and Falsification" section for an investment memo.
 
@@ -60,12 +64,42 @@ Past Lessons: {past_memory_str}
 **Debate History:**
 {history}
 
+CRITICAL OUTPUT FORMAT:
+You must return your final response as a JSON object with the following structure:
+{{
+    "decision_text": "Your detailed text decision...",
+    "risks_falsification": {risks_schema},
+    "monitoring_plan": {monitoring_schema}
+}}
+
+Ensure the JSON is valid and strictly follows the schema.
 Synthesize this information into the structured format above. Be decisive and professional."""
 
         response = llm.invoke(prompt)
 
+        decision_text = ""
+        risks_falsification = {}
+        monitoring_plan = {}
+
+        try:
+            content = response.content
+            json_str = content
+            if "```json" in content:
+                json_str = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                json_str = content.split("```")[1].split("```")[0]
+            
+            data = json.loads(json_str.strip())
+            if isinstance(data, dict):
+                decision_text = data.get("decision_text", "")
+                risks_falsification = data.get("risks_falsification", {})
+                monitoring_plan = data.get("monitoring_plan", {})
+        except Exception:
+            decision_text = response.content
+            pass
+
         new_risk_debate_state = {
-            "judge_decision": response.content,
+            "judge_decision": decision_text,
             "history": risk_debate_state["history"],
             "risky_history": risk_debate_state["risky_history"],
             "safe_history": risk_debate_state["safe_history"],
@@ -79,7 +113,9 @@ Synthesize this information into the structured format above. Be decisive and pr
 
         return {
             "risk_debate_state": new_risk_debate_state,
-            "final_trade_decision": response.content,
+            "final_trade_decision": decision_text,
+            "risks_falsification": risks_falsification, # Store structured data
+            "monitoring_plan": monitoring_plan # Store structured data
         }
 
     return risk_manager_node

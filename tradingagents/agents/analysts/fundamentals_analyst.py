@@ -4,7 +4,7 @@ import json
 from tradingagents.agents.utils.agent_utils import get_fundamentals, get_balance_sheet, get_cashflow, get_income_statement, get_insider_sentiment, get_insider_transactions
 from tradingagents.dataflows.config import get_config
 from tradingagents.utils.timeframes import describe_window, lookback_start
-
+from cli.schema import BusinessStrategy, FundamentalMetric
 
 def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
@@ -23,6 +23,10 @@ def create_fundamentals_analyst(llm):
             get_income_statement,
         ]
 
+        # Get schemas
+        biz_schema = json.dumps(BusinessStrategy.model_json_schema(), indent=2)
+        metric_schema = json.dumps(FundamentalMetric.model_json_schema(), indent=2)
+
         system_message = (
             f"You are a Fundamental Equity Analyst. Your goal is to dissect the company's financial health and business model for {window_desc} (covering {window_start} to {current_date})."
             " Go beyond basic ratios. Analyze:"
@@ -30,19 +34,19 @@ def create_fundamentals_analyst(llm):
             "\n2. **Capital Allocation:** ROIC trends, buybacks vs. capex, management incentives."
             "\n3. **Moat Durability:** Pricing power, margin stability, competitive erosion."
             "\n\nProduce a professional 'Company Overview' and 'Financial Analysis' report."
-            + """ 
+            + f""" 
             
             CRITICAL OUTPUT FORMAT:
             You must return your final response as a JSON object with the following structure:
             {{
                 "report": "Your detailed Markdown report here...",
                 "data": {{
-                    "signal": "bullish" | "bearish" | "neutral",
-                    "confidence": 0.0 to 1.0,
-                    "financial_health": "strong" | "weak" | "stable",
-                    "key_ratios": {{ "ratio_name": "value", ... }}
+                    "business_strategy": {biz_schema},
+                    "fundamental_evolution": [{metric_schema}]
                 }}
             }}
+            
+            Ensure the JSON is valid and strictly follows the schema.
             """
             + " Use the available tools: `get_fundamentals`, `get_balance_sheet`, `get_cashflow`, `get_income_statement`.",
         )

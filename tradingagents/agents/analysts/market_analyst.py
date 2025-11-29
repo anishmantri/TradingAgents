@@ -4,7 +4,7 @@ import json
 from tradingagents.agents.utils.agent_utils import get_stock_data, get_indicators
 from tradingagents.dataflows.config import get_config
 from tradingagents.utils.timeframes import describe_window, lookback_start
-
+from cli.schema import PriceStats
 
 def create_market_analyst(llm):
 
@@ -21,6 +21,9 @@ def create_market_analyst(llm):
             get_stock_data,
             get_indicators,
         ]
+
+        # Get schema
+        price_stats_schema = json.dumps(PriceStats.model_json_schema(), indent=2)
 
         system_message = (
             f"""You are a quantitative trading assistant tasked with analyzing financial markets over the {window_desc}. Focus on price action between {window_start} and {current_date}. Your role is to select the **most relevant quantitative metrics** for the current market regime. Choose up to **8 indicators** that provide orthogonal (non-redundant) signals.
@@ -56,7 +59,7 @@ INSTRUCTIONS:
    - Provide a nuanced, institutional-grade assessment of the market structure.
 
 Select indicators that provide diverse and complementary information. Avoid redundancy. Call `get_stock_data` first, then `get_indicators` with the specific indicator names."""
-            + """ 
+            + f""" 
             
             CRITICAL OUTPUT FORMAT:
             You must return your final response as a JSON object with the following structure:
@@ -65,9 +68,12 @@ Select indicators that provide diverse and complementary information. Avoid redu
                 "data": {{
                     "signal": "bullish" | "bearish" | "neutral",
                     "confidence": 0.0 to 1.0,
+                    "price_stats": {price_stats_schema},
                     "key_metrics": {{ "metric_name": "value", ... }}
                 }}
             }}
+            
+            Ensure the JSON is valid and strictly follows the schema.
             """
         )
 

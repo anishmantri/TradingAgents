@@ -1042,11 +1042,13 @@ def save_structured_reports(final_state, selections, report_dir, message_buffer,
         logger.warning(f"Missing keys in final_state: {missing_keys}")
         console.print(f"[yellow]Warning: Missing data for report: {missing_keys}[/yellow]")
 
-    from cli.report_generator import build_latex_report, build_markdown_report
+    from cli.new_report_generator import construct_investment_memo, render_latex_report
+    from cli.report_generator import build_markdown_report
     from cli.latex_utils import save_latex_debug
 
     try:
-        latex_report = build_latex_report(final_state, selections, decision, report_dir)
+        memo = construct_investment_memo(final_state, selections)
+        latex_report = render_latex_report(memo)
         (report_dir / "final_report.tex").write_text(latex_report)
         save_latex_debug(latex_report, report_dir / "debug_final_report.tex")
         console.print(f"[green]Saved LaTeX report to {report_dir / 'final_report.tex'}[/green]")

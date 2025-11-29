@@ -4,7 +4,7 @@ import json
 from tradingagents.agents.utils.agent_utils import get_news, get_global_news
 from tradingagents.dataflows.config import get_config
 from tradingagents.utils.timeframes import describe_window, lookback_start
-
+from cli.schema import Event, Catalyst
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
@@ -20,6 +20,10 @@ def create_news_analyst(llm):
             get_global_news,
         ]
 
+        # Get schemas
+        event_schema = json.dumps(Event.model_json_schema(), indent=2)
+        catalyst_schema = json.dumps(Catalyst.model_json_schema(), indent=2)
+
         system_message = (
             f"You are an Event-Driven Analyst. Your job is to identify specific catalysts and macro headwinds/tailwinds for {window_desc} (covering {window_start} to {current_date})."
             " Do not just list headlines. Analyze:"
@@ -27,7 +31,7 @@ def create_news_analyst(llm):
             "\n2. **Impact:** How does each event change the valuation model? (e.g., 'New regulation increases compliance costs by 15%')."
             "\n3. **Consensus vs. Reality:** What is the market pricing in vs. what is likely to happen?"
             "\n\nProduce a professional 'Catalysts and Timeline' report."
-            + """ 
+            + f""" 
             
             CRITICAL OUTPUT FORMAT:
             You must return your final response as a JSON object with the following structure:
@@ -37,9 +41,12 @@ def create_news_analyst(llm):
                     "signal": "bullish" | "bearish" | "neutral",
                     "confidence": 0.0 to 1.0,
                     "impact_score": 0.0 to 10.0,
-                    "key_events": ["event1", "event2"]
+                    "key_events": [{event_schema}],
+                    "upcoming_catalysts": [{catalyst_schema}]
                 }}
             }}
+            
+            Ensure the JSON is valid and strictly follows the schema.
             """
         )
 
